@@ -1,0 +1,4 @@
+# Службові файли CI та звіти не скануємо
+.github/
+semgrep.json
+semgrep.sarif

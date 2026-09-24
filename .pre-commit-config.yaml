@@ -1,0 +1,13 @@
+# Локальна перевірка ДО коміту (shift left для Dev).
+# Встановлення: pip install pre-commit && pre-commit install
+repos:
+  - repo: https://github.com/semgrep/pre-commit
+    rev: "v1.178.0"
+    hooks:
+      - id: semgrep
+        args:
+          - --config=p/python
+          - --config=p/secrets
+          - --config=.semgrep/
+          - --error
+          - --skip-unknown-extensions

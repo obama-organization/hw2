@@ -1,0 +1,58 @@
+name: SAST (Semgrep)
+
+on:
+  push:
+    branches: [main]
+  pull_request:          # перевірка кожного PR до мерджу — shift left
+  workflow_dispatch:     # ручний запуск з вкладки Actions
+  schedule:
+    - cron: "0 6 * * 1"  # щопонеділка: нові правила можуть знайти старі баги
+
+# Принцип найменших прав для GITHUB_TOKEN: лише читання коду
+permissions:
+  contents: read
+
+concurrency:
+  group: semgrep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  semgrep:
+    name: Semgrep scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false   # токен не залишається в .git/config
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep (фіксована версія)
+        run: pip install "semgrep==1.178.0"
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config p/python \
+            --config p/secrets \
+            --config p/owasp-top-ten \
+            --config .semgrep/ \
+            --metrics=off \
+            --json-output=semgrep.json \
+            --sarif-output=semgrep.sarif
+
+      - name: Summary + quality gate (падає на ERROR)
+        run: python .github/scripts/semgrep_summary.py semgrep.json
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: semgrep-report
+          path: |
+            semgrep.json
+            semgrep.sarif
+          retention-days: 14
