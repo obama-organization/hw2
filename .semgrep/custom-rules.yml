@@ -1,0 +1,37 @@
+rules:
+  - id: hardcoded-django-secret-key
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SECRET_KEY is hardcoded. Load it from an environment variable
+      or a secrets manager.
+    metadata:
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      owasp: "A07:2021 - Identification and Authentication Failures"
+    pattern: SECRET_KEY = "..."
+
+  - id: debug-enabled
+    languages: [python]
+    severity: WARNING
+    message: >-
+      DEBUG = True exposes stack traces and settings. Control it with an
+      environment variable and keep it disabled in production.
+    metadata:
+      cwe: "CWE-489: Active Debug Code"
+    pattern: DEBUG = True
+
+  - id: credentials-in-url
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Credentials are embedded in a URL (http://user:pass@host). They leak
+      into logs, the database and Git history.
+    metadata:
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+    patterns:
+      - pattern-either:
+          - pattern: '"$URL"'
+          - pattern: f"$URL"
+      - metavariable-regex:
+          metavariable: $URL
+          regex: '(?i)https?://[^/\s:@{}]+:[^/\s@{}]+@'
