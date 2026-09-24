@@ -1,110 +1,117 @@
 #!/usr/bin/python3
-
-import os
-import cv2
-import time
-import sys
-import pymysql
-import time
-import requests
-import socket
-from multiprocessing import Pool
 import configparser
+import logging
+import os
+import re
+import socket
+import time
+from contextlib import closing
+from multiprocessing import Pool
+
+import cv2
+import pymysql
+import requests
+
 import substream
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger(__name__)
+
 config = configparser.ConfigParser()
-config.read("/root/scripts/VIDEO/config.ini")
-host_ip = socket.gethostbyname(socket.gethostname())
+config.read(os.environ.get("SCAN_CONFIG", "/etc/rtsp-scan/config.ini"))
+
+HOST_IP = socket.gethostbyname(socket.gethostname())
+HOSTNAME = os.uname()[1]
+SNAPSHOT_DIR = "/var/www/html/scan"
+WORKERS = int(os.environ.get("SCAN_WORKERS", "20"))
+UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]")
 
 
-def get_cursor():
-    connection = pymysql.connect(
-        host=config['MySQL']['host'],
-        user=config['MySQL']['user'],
-        password=config['MySQL']['password'],
-        database=config['MySQL']['database'])
+def get_connection():
+    return pymysql.connect(
+        host=config["MySQL"]["host"],
+        user=config["MySQL"]["user"],
+        password=config["MySQL"]["password"],
+        database=config["MySQL"]["database"],
+    )
 
-    return connection.cursor(), connection
+
+def select_link_list():
+    with closing(get_connection()) as con, con.cursor() as cur:
+        cur.execute("SELECT `path`, `login`, `passwd` FROM `view_support_path_default`")
+        return cur.fetchall()
 
 
 def select_ip_list():
-    cursor, connection = get_cursor()
-    cursor = connection.cursor()
-    query = f"""SELECT `ip`, CONCAT(REPLACE(`ip`,'.','_'), '-' , `country_code`, '-', `region`, '-', `city`) as 'name_camera'
-            FROM rtsp_scan where `url` is NULL and `up` = '{os.uname()[1]}';"""
-    cursor.execute(query)
-    return cursor.fetchall()
-
-
-
-cursor, connection = get_cursor()
-cursor = connection.cursor()
-query = "SELECT `path`, `login`, `passwd` FROM `view_support_path_default`"
-cursor.execute(query)
-link_list = cursor.fetchall()
-
-#link_list = []
-#for i in rows:
-#    link_list.append(i[0])
+    query = """SELECT `ip`, CONCAT(REPLACE(`ip`,'.','_'), '-', `country_code`, '-',
+                      `region`, '-', `city`) AS name_camera
+               FROM rtsp_scan WHERE `url` IS NULL AND `up` = %s"""
+    with closing(get_connection()) as con, con.cursor() as cur:
+        cur.execute(query, (HOSTNAME,))
+        return cur.fetchall()
 
 
 def insert_url(link_one, ip, link, login, passwd):
-    cursor, con = get_cursor()
-    cursor = con.cursor()
+    query = """UPDATE `rtsp_scan`
+               SET `url` = %s, `up` = %s, `link` = %s, `login` = %s, `passwd` = %s
+               WHERE `ip` = %s"""
+    with closing(get_connection()) as con, con.cursor() as cur:
+        cur.execute(query, (link_one, HOSTNAME, link, login, passwd, ip))
+        con.commit()
+    log.info("Updated record for %s", ip)
 
-    query = f"""UPDATE `rtsp_scan` SET `url` = '{link_one}', `up` = '{os.uname()[1]}', `link` = '{link}', `login` = '{login}', `passwd` = '{passwd}'
-                WHERE `ip` = '{ip}';"""
-    print(query)
-    cursor.execute(query)
-    con.commit()
 
-
-def job(ip):
-
+def job(item):
+    rtsp_url, ip, camera_name, login, passwd = item
+    safe_name = UNSAFE_CHARS.sub("_", camera_name)
+    cap = cv2.VideoCapture(rtsp_url)
     try:
-        cap = cv2.VideoCapture(ip[0])
         ret, frame = cap.read()
-        if ret:
-            print(ip)
-            name_file = f"/var/www/html/scan/{ip[2]}.jpg"
-            url_link = f"http://admin:sdcsdtu-GdgLLJmm@{host_ip}/scan/{ip[2]}.jpg"
-            cv2.imwrite(name_file, frame)
-
-            insert_url(ip[0], ip[1], url_link, ip[3], ip[4])
+        if not ret:
             return
+        cv2.imwrite(os.path.join(SNAPSHOT_DIR, f"{safe_name}.jpg"), frame)
+        link = f"http://{HOST_IP}/scan/{safe_name}.jpg"
+        insert_url(rtsp_url, ip, link, login, passwd)
+    except (cv2.error, pymysql.MySQLError, OSError) as exc:
+        log.warning("Failed to process %s: %s", ip, exc)
+    finally:
+        cap.release()
 
-        else:
-            return
-    except Exception as e:
+
+def notify(text):
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        log.warning("Telegram is not configured, notification skipped")
         return
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        log.warning("Failed to send notification: %s", type(exc).__name__)
 
 
 def main():
-    for link in link_list:
-        rtsp_list = []
-        for ip in select_ip_list():
-            rtsp_list.append([link[0].replace('ip_for_replace', ip[0]), ip[0], ip[1], link[1], link[2]])
-
+    for path, login, passwd in select_link_list():
+        tasks = [
+            [path.replace("ip_for_replace", ip), ip, name, login, passwd]
+            for ip, name in select_ip_list()
+        ]
         start = time.time()
-        with Pool(processes=200) as p:
-            p.map(job, rtsp_list)
-        print("And start sleep")
-        end = time.time()
-        sl_tm = 300 - int((end - start))
-        print(sl_tm)
-        if sl_tm > 0:
-            time.sleep(sl_tm) # чекаємо 5 хв
+        with Pool(processes=WORKERS) as pool:
+            pool.map(job, tasks)
+        pause = 300 - int(time.time() - start)
+        log.info("Cycle finished, sleeping %s s", max(pause, 0))
+        if pause > 0:
+            time.sleep(pause)
 
 
 if __name__ == "__main__":
-    start_time = time.time()
+    started = time.time()
     main()
-    done = time.time() - start_time
-
-    TOKEN = '5410845659:AAHKyxGyjRUZG-b_iNC52M7xiSPlHDLZMOw'
-    CHAT_ID = '-1001533673238'
-    SEND_URL = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
-
-    requests.post(SEND_URL, json={'chat_id': CHAT_ID, 'text': f"41_scan_stream_default done - {int(done)}"})
+    notify(f"41_scan_stream_default done - {int(time.time() - started)}")
     substream.main()
-    
