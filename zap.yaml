@@ -27,7 +27,7 @@ jobs:
 - parameters:
     reportDescription: ''
     reportDir: /zap/wrk/
-    reportFile: zap-report.html
+    reportFile: zap-login-report.html
     reportTitle: ZAP Scanning Report
     template: traditional-html
   type: report
