@@ -1,0 +1,60 @@
+---
+env:
+  contexts:
+    - name: juice-login
+      urls:
+        - https://preview.owasp-juice.shop
+      includePaths:
+        - https://preview.owasp-juice.shop.*
+      excludePaths: []
+  parameters:
+    failOnError: true
+    failOnWarning: false
+    progressToStdout: true
+
+jobs:
+  - type: passiveScan-config
+    parameters:
+      enableTags: false
+      maxAlertsPerRule: 10
+
+  - type: spider
+    parameters:
+      context: juice-login
+      url: https://preview.owasp-juice.shop
+      maxDuration: 2
+      maxDepth: 5
+
+  - type: spiderAjax
+    parameters:
+      context: juice-login
+      url: https://preview.owasp-juice.shop/#/login
+      maxDuration: 4
+      browserId: firefox-headless
+      numberOfBrowsers: 1
+
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+
+  - type: outputSummary
+    parameters:
+      format: Long
+      summaryFile: /zap/wrk/zap-summary.json
+
+  - type: report
+    parameters:
+      template: traditional-html
+      reportDir: /zap/wrk/
+      reportFile: zap-report-login.html
+      reportTitle: ZAP Report — Juice Shop Login (Variant 2)
+      reportDescription: >-
+        Passive DAST scan of the OWASP Juice Shop login page performed with
+        OWASP ZAP via the Automation Framework (traditional + AJAX spider).
+
+  - type: report
+    parameters:
+      template: traditional-json
+      reportDir: /zap/wrk/
+      reportFile: zap-report-login.json
+      reportTitle: ZAP Report — Juice Shop Login (Variant 2)
