@@ -1,0 +1,5 @@
+Django==6.1.1
+django-environ==0.14.0
+opencv-python==5.0.0.93
+PyMySQL==1.2.3
+requests==2.34.2

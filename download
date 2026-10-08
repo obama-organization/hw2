@@ -1,0 +1,11 @@
+.git
+.github
+.semgrep
+.semgrepignore
+.pre-commit-config.yaml
+.gitignore
+.dockerignore
+.syft.yaml
+zap-reports
+sbom.*.json
+*.md
