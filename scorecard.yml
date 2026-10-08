@@ -1,0 +1,82 @@
+name: OpenSSF Scorecard
+
+on:
+  branch_protection_rule:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 5 * * 1"
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard (SARIF)
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Run Scorecard (JSON)
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.json
+          results_format: json
+          publish_results: false
+
+      - name: Upload results
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-results
+          path: |
+            results.sarif
+            results.json
+          retention-days: 30
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: results.sarif
+          category: scorecard
+
+  summary:
+    name: Score summary
+    needs: analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: scorecard-results
+
+      - name: Write score to job summary
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+
+          data = json.load(open("results.json", encoding="utf-8"))
+          print(f"## OpenSSF Scorecard: {data['score']} / 10")
+          print()
+          print(f"Commit `{data['repo']['commit'][:7]}`, {data['date']}")
+          print()
+          print("| Check | Score | Reason |")
+          print("|---|---|---|")
+          for check in sorted(data["checks"], key=lambda c: c["name"]):
+              score = "?" if check["score"] < 0 else check["score"]
+              print(f"| {check['name']} | {score} | {check['reason']} |")
+          EOF
