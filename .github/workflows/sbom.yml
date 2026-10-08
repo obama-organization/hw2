@@ -33,6 +33,7 @@ jobs:
           output-file: sbom.cdx.json
           artifact-name: sbom.cdx.json
           upload-artifact-retention: 30
+          upload-release-assets: false
 
       - name: Scan SBOM with Grype (SARIF)
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2

@@ -47,12 +47,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            --verify-tag \
-            "hw2-${GITHUB_REF_NAME}.tar.gz" \
-            "hw2-${GITHUB_REF_NAME}.tar.gz.sigstore.json" \
-            "hw2-${GITHUB_REF_NAME}.sbom.cdx.json" \
+          assets=(
+            "hw2-${GITHUB_REF_NAME}.tar.gz"
+            "hw2-${GITHUB_REF_NAME}.tar.gz.sigstore.json"
+            "hw2-${GITHUB_REF_NAME}.sbom.cdx.json"
             "hw2-${GITHUB_REF_NAME}.sbom.cdx.json.sigstore.json"
+          )
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" > /dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber "${assets[@]}"
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              --verify-tag \
+              "${assets[@]}"
+          fi
