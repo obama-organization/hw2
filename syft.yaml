@@ -1,0 +1,4 @@
+exclude:
+  - ./sbom.cyclonedx.json
+  - ./sbom.spdx.json
+  - ./zap-reports/**
