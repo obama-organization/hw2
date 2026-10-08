@@ -34,6 +34,7 @@ jobs:
           scanners: vuln,misconfig,secret
           format: sarif
           output: trivy-repo.sarif
+          version: v0.75.0
 
       - name: Upload SARIF to GitHub Security
         if: github.actor != 'dependabot[bot]'
@@ -104,6 +105,7 @@ jobs:
           scanners: vuln,secret
           format: sarif
           output: trivy-image.sarif
+          version: v0.75.0
 
       - name: Upload SARIF to GitHub Security
         if: github.actor != 'dependabot[bot]'
@@ -178,6 +180,7 @@ jobs:
           format: json
           output: trivy-sbom.json
           list-all-pkgs: true
+          version: v0.75.0
 
       - name: Scan SBOM with Grype
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
