@@ -1,0 +1,15 @@
+---
+- name: Add Kubernetes apt repository
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types: deb
+    uris: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor_version }}/deb/"
+    suites: /
+    signed_by: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor_version }}/deb/Release.key"
+    state: present
+
+- name: Refresh apt cache
+  ansible.builtin.apt:
+    lock_timeout: 600
+    update_cache: true
+  changed_when: false

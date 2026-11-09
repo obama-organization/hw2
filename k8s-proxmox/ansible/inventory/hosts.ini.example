@@ -1,0 +1,17 @@
+[setup]
+Study7-k8s-setup ansible_host=192.168.5.71
+
+[control_plane]
+Study7-k8s-cp ansible_host=192.168.5.72
+
+[workers]
+Study7-k8s-w1 ansible_host=192.168.5.73
+Study7-k8s-w2 ansible_host=192.168.5.74
+
+[k8s_cluster:children]
+control_plane
+workers
+
+[all:vars]
+ansible_user=study7
+ansible_ssh_private_key_file=~/.ssh/study7

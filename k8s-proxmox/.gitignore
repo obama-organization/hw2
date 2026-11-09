@@ -1,0 +1,14 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+crash.log
+ansible/inventory/hosts.ini
+study7-*.conf
+wg*.conf
+token.txt
+admin.conf
+kubeconfig
+*.kubeconfig
+.DS_Store

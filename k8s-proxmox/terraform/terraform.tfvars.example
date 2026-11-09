@@ -1,0 +1,30 @@
+nodes = {
+  "Study7-k8s-setup" = {
+    role   = "setup"
+    ip     = "192.168.5.71"
+    cores  = 1
+    memory = 1024
+    disk   = "20G"
+  }
+  "Study7-k8s-cp" = {
+    role   = "control_plane"
+    ip     = "192.168.5.72"
+    cores  = 2
+    memory = 2048
+    disk   = "30G"
+  }
+  "Study7-k8s-w1" = {
+    role   = "worker"
+    ip     = "192.168.5.73"
+    cores  = 2
+    memory = 2048
+    disk   = "30G"
+  }
+  "Study7-k8s-w2" = {
+    role   = "worker"
+    ip     = "192.168.5.74"
+    cores  = 2
+    memory = 2048
+    disk   = "30G"
+  }
+}

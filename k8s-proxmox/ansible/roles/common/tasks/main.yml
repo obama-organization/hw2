@@ -1,0 +1,57 @@
+---
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname | lower }}"
+
+- name: Resolve own hostname locally
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s'
+    line: "127.0.1.1 {{ inventory_hostname | lower }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Keep hostname and hosts file after reboot
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud.cfg.d/99-study7-hostname.cfg
+    content: |
+      preserve_hostname: true
+      manage_etc_hosts: false
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Install base packages
+  ansible.builtin.apt:
+    lock_timeout: 600
+    name:
+      - ca-certificates
+      - curl
+      - gpg
+      - chrony
+      - qemu-guest-agent
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable time synchronization
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+
+- name: Harden SSH server
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/00-study7.conf
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      X11Forwarding no
+      MaxAuthTries 3
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart ssh

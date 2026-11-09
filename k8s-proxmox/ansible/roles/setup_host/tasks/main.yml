@@ -1,0 +1,32 @@
+---
+- name: Install management tools
+  ansible.builtin.apt:
+    lock_timeout: 600
+    name:
+      - kubectl
+      - git
+    state: present
+
+- name: Read admin kubeconfig from control plane
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/admin.conf
+  delegate_to: "{{ groups['control_plane'][0] }}"
+  register: setup_host_kubeconfig
+  no_log: true
+
+- name: Create kubeconfig directory
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0700"
+
+- name: Install kubeconfig
+  ansible.builtin.copy:
+    content: "{{ setup_host_kubeconfig.content | b64decode }}"
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  no_log: true

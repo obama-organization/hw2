@@ -1,0 +1,5 @@
+---
+profile: production
+offline: false
+exclude_paths:
+  - inventory/

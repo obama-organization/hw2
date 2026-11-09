@@ -1,0 +1,32 @@
+---
+- name: Prepare all hosts
+  hosts: all
+  become: true
+  roles:
+    - common
+    - k8s_repo
+
+- name: Prepare Kubernetes nodes
+  hosts: k8s_cluster
+  become: true
+  roles:
+    - k8s_node
+
+- name: Initialize control plane
+  hosts: control_plane
+  become: true
+  roles:
+    - control_plane
+
+- name: Join worker nodes
+  hosts: workers
+  become: true
+  serial: 1
+  roles:
+    - worker
+
+- name: Configure management host
+  hosts: setup
+  become: true
+  roles:
+    - setup_host

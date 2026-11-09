@@ -1,0 +1,34 @@
+---
+- name: Check whether node has joined the cluster
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: worker_kubelet_conf
+
+- name: Create join command on control plane
+  ansible.builtin.command: kubeadm token create --print-join-command --ttl 30m
+  delegate_to: "{{ groups['control_plane'][0] }}"
+  register: worker_join_command
+  when: not worker_kubelet_conf.stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Join node to the cluster
+  ansible.builtin.command: "{{ worker_join_command.stdout }} --node-name {{ inventory_hostname | lower }}"
+  when: not worker_kubelet_conf.stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Label node as worker
+  ansible.builtin.command: kubectl label node {{ inventory_hostname | lower }} node-role.kubernetes.io/worker= --overwrite
+  delegate_to: "{{ groups['control_plane'][0] }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: worker_label
+  changed_when: "'not labeled' not in worker_label.stdout"
+
+- name: Wait for node to be ready
+  ansible.builtin.command: kubectl wait --for=condition=Ready node/{{ inventory_hostname | lower }} --timeout=600s
+  delegate_to: "{{ groups['control_plane'][0] }}"
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  changed_when: false

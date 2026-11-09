@@ -1,0 +1,7 @@
+---
+k8s_minor_version: "1.37"
+calico_version: v3.33.0
+pod_network_cidr: 10.244.0.0/16
+service_cidr: 10.96.0.0/12
+cluster_name: study7
+app_namespace: study7-app
