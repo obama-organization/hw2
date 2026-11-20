@@ -1,0 +1,36 @@
+all:
+  vars:
+    cluster_name: ${cluster_name}
+    talos_version: ${talos_version}
+    talos_schematic_id: ${talos_schematic_id}
+    lan_gateway: ${gateway}
+    lan_prefix: ${cidr_prefix}
+    talos_platform: ${talos_platform}
+  children:
+    monitoring:
+      hosts:
+        ${mon_name}:
+          ansible_host: ${mon_ip}
+          ansible_user: ${admin_user}
+    talos:
+      vars:
+        ansible_connection: local
+      children:
+        talos_controlplane:
+          hosts:
+%{ for name, n in controlplanes ~}
+            ${name}:
+              ansible_host: ${n.ip}
+              talos_role: controlplane
+              proxmox_vmid: ${vm_ids[name]}
+              mac_address: "${lower(macs[name])}"
+%{ endfor ~}
+        talos_workers:
+          hosts:
+%{ for name, n in workers ~}
+            ${name}:
+              ansible_host: ${n.ip}
+              talos_role: worker
+              proxmox_vmid: ${vm_ids[name]}
+              mac_address: "${lower(macs[name])}"
+%{ endfor ~}

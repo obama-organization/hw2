@@ -1,0 +1,28 @@
+# {{ ansible_managed }}
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://127.0.0.1:{{ port_prometheus }}
+    isDefault: true
+    jsonData:
+      timeInterval: 30s
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://127.0.0.1:{{ port_loki }}
+    jsonData:
+      maxLines: 1000
+
+  - name: Alertmanager
+    uid: alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://127.0.0.1:{{ port_alertmanager }}
+    jsonData:
+      implementation: prometheus
+      handleGrafanaManagedAlerts: false

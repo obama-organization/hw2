@@ -1,0 +1,117 @@
+# {{ ansible_managed }}
+name: observability
+
+x-common: &common
+  restart: unless-stopped
+  network_mode: host
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  loki:
+    <<: *common
+    image: {{ images.loki }}
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki-data:/loki
+    mem_limit: 512m
+
+  vector:
+    <<: *common
+    image: {{ images.vector }}
+    command: ["--config", "/etc/vector/vector.yaml"]
+    environment:
+      VECTOR_LOG: warn
+    volumes:
+      - ./vector:/etc/vector:ro
+      - vector-data:/var/lib/vector
+    depends_on: [loki]
+    mem_limit: 256m
+
+  prometheus:
+    <<: *common
+    image: {{ images.prometheus }}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.listen-address=:{{ port_prometheus }}
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    mem_limit: 512m
+
+  alertmanager:
+    <<: *common
+    image: {{ images.alertmanager }}
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=:{{ port_alertmanager }}
+      - --cluster.listen-address=
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    mem_limit: 128m
+
+  grafana:
+    <<: *common
+    image: {{ images.grafana }}
+    env_file: [./grafana/grafana.env]
+    environment:
+      GF_SERVER_HTTP_PORT: "{{ port_grafana }}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on: [prometheus, loki]
+    mem_limit: 512m
+
+  node-exporter:
+    <<: *common
+    image: {{ images.node_exporter }}
+    command: ["--path.rootfs=/host", "--web.listen-address=:{{ port_node_exporter }}"]
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    mem_limit: 64m
+
+  seaweedfs:
+    <<: *common
+    image: {{ images.seaweedfs }}
+    command:
+      - server
+      - -dir=/data
+      - -ip=127.0.0.1
+      - -ip.bind=127.0.0.1
+      - -master.volumeSizeLimitMB=1024
+      - -volume.max=0
+      - -s3
+      - -s3.port={{ port_s3 }}
+      - -s3.ip.bind=0.0.0.0
+      - -s3.config=/etc/seaweedfs/s3.json
+      - -s3.cert.file=/etc/seaweedfs/certs/s3.crt
+      - -s3.key.file=/etc/seaweedfs/certs/s3.key
+    volumes:
+      - ./seaweedfs:/etc/seaweedfs:ro
+      - seaweedfs-data:/data
+    mem_limit: 512m
+
+volumes:
+  loki-data:
+  vector-data:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+  seaweedfs-data:

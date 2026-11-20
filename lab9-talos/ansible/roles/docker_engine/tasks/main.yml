@@ -1,0 +1,25 @@
+---
+- name: Docker Engine і Compose v2 з репозиторію Ubuntu
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - docker-compose-v2
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Налаштування демона Docker (ротація логів, no-new-privileges, live-restore)
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+    content: "{{ docker_daemon_config | to_nice_json }}\n"
+  notify: Restart docker
+
+- name: Docker запущено
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Застосувати зміни демона до запуску контейнерів
+  ansible.builtin.meta: flush_handlers

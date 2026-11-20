@@ -1,0 +1,7 @@
+---
+- name: Резервне копіювання кластера Velero -> S3 (SeaweedFS на ВМ моніторингу)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - velero_backup

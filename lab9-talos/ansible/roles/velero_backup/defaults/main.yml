@@ -1,0 +1,2 @@
+---
+velero_repo_password: "{{ lookup('ansible.builtin.password', secrets_dir ~ '/velero_repo_password', length=32, chars=['ascii_letters', 'digits']) }}"

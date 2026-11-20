@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+apiVersion: velero.io/v1
+kind: Backup
+metadata:
+  name: {{ velero_backup_name }}
+  namespace: velero
+spec:
+  includedNamespaces: ["*"]
+  defaultVolumesToFsBackup: true
+  snapshotVolumes: false
+  storageLocation: default
+  ttl: {{ velero_backup_ttl }}

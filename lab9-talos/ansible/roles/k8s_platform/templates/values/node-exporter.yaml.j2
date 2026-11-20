@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+hostNetwork: true
+hostPID: true
+hostRootFsMount:
+  enabled: {{ node_exporter_host_rootfs | bool | lower }}
+resources:
+  requests: { cpu: 10m, memory: 24Mi }
+  limits: { memory: 64Mi }
+prometheus:
+  monitor:
+    enabled: false

@@ -1,0 +1,7 @@
+---
+- name: Кластер Kubernetes на Talos Linux
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - talos_cluster

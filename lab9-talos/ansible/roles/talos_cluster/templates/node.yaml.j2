@@ -1,0 +1,23 @@
+# {{ ansible_managed }}
+apiVersion: v1alpha1
+kind: HostnameConfig
+auto: "off"
+hostname: {{ item }}
+{% if hostvars[item]['mac_address'] is defined and talos_dhcp_bootstrap | bool %}
+---
+# Статична адреса: інтерфейс знаходимо за MAC, тож ім'я (ens18 тощо) знати не потрібно
+apiVersion: v1alpha1
+kind: LinkAliasConfig
+name: lan0
+selector:
+  match: mac(link.permanent_addr) == "{{ hostvars[item]['mac_address'] | lower }}"
+---
+apiVersion: v1alpha1
+kind: LinkConfig
+name: lan0
+up: true
+addresses:
+  - address: {{ hostvars[item]['ansible_host'] }}/{{ lan_prefix | default(24) }}
+routes:
+  - gateway: {{ lan_gateway }}
+{% endif %}

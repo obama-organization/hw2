@@ -1,0 +1,10 @@
+---
+- name: ВМ моніторингу і бекапів (Ubuntu 24.04)
+  hosts: monitoring
+  become: true
+  roles:
+    - base_hardening
+    - role: talos_dhcp
+      when: talos_dhcp_bootstrap | bool
+    - docker_engine
+    - observability_stack

@@ -1,0 +1,222 @@
+---
+- name: Каталоги стеку спостереження
+  ansible.builtin.file:
+    path: "{{ obs_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - ""
+    - loki
+    - vector
+    - prometheus
+    - prometheus/rules
+    - alertmanager
+    - grafana
+    - grafana/provisioning
+    - grafana/provisioning/datasources
+    - grafana/provisioning/dashboards
+    - grafana/provisioning/plugins
+    - grafana/provisioning/alerting
+    - grafana/dashboards
+    - seaweedfs
+    - seaweedfs/certs
+
+- name: Каталоги секретів (читає лише користувач nobody у контейнері)
+  ansible.builtin.file:
+    path: "{{ obs_dir }}/{{ item }}"
+    state: directory
+    owner: "65534"
+    group: "65534"
+    mode: "0500"
+  loop: [prometheus/secrets, alertmanager/secrets]
+
+- name: Самопідписаний сертифікат S3 з SAN = IP ВМ
+  ansible.builtin.command: >-
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 825
+    -keyout {{ obs_dir }}/seaweedfs/certs/s3.key
+    -out {{ obs_dir }}/seaweedfs/certs/s3.crt
+    -subj "/CN={{ inventory_hostname }}"
+    -addext "subjectAltName=IP:{{ ansible_host }},DNS:{{ inventory_hostname }}"
+  args:
+    creates: "{{ obs_dir }}/seaweedfs/certs/s3.crt"
+  notify: Restart seaweedfs
+
+- name: Права на ключ S3
+  ansible.builtin.file:
+    path: "{{ obs_dir }}/seaweedfs/certs/s3.key"
+    mode: "0600"
+
+- name: Забрати сертифікат S3 на машину керування (для caCert у Velero)
+  ansible.builtin.fetch:
+    src: "{{ obs_dir }}/seaweedfs/certs/s3.crt"
+    dest: "{{ secrets_dir }}/s3-ca.crt"
+    flat: true
+
+- name: Docker Compose
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ obs_dir }}/compose.yml"
+    mode: "0644"
+
+- name: Loki
+  ansible.builtin.copy:
+    src: loki.yml
+    dest: "{{ obs_dir }}/loki/loki.yml"
+    mode: "0644"
+  notify: Restart loki
+
+- name: Vector — конфігурація агрегатора
+  ansible.builtin.copy:
+    src: vector.yaml
+    dest: "{{ obs_dir }}/vector/vector.yaml"
+    mode: "0644"
+  notify: Restart vector
+
+- name: Vector — таблиця IP -> ім'я вузла Talos
+  ansible.builtin.template:
+    src: nodes.csv.j2
+    dest: "{{ obs_dir }}/vector/nodes.csv"
+    mode: "0644"
+  notify: Restart vector
+
+- name: Prometheus — конфігурація скрейпу
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ obs_dir }}/prometheus/prometheus.yml"
+    mode: "0644"
+  notify: Reload prometheus
+
+- name: Prometheus — правила алертів
+  ansible.builtin.copy:
+    src: rules/
+    dest: "{{ obs_dir }}/prometheus/rules/"
+    mode: "0644"
+  notify: Reload prometheus
+
+- name: Токен K8s для Prometheus (заглушка до розгортання кластера)
+  ansible.builtin.copy:
+    dest: "{{ obs_dir }}/prometheus/secrets/k8s-token"
+    content: ""
+    force: false
+    owner: "65534"
+    group: "65534"
+    mode: "0400"
+
+- name: Alertmanager
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ obs_dir }}/alertmanager/alertmanager.yml"
+    mode: "0644"
+  notify: Reload alertmanager
+
+- name: Alertmanager — токен Telegram-бота
+  ansible.builtin.copy:
+    dest: "{{ obs_dir }}/alertmanager/secrets/telegram_bot_token"
+    content: "{{ telegram_bot_token }}"
+    owner: "65534"
+    group: "65534"
+    mode: "0400"
+  no_log: true
+  when: telegram_bot_token | length > 0
+  notify: Reload alertmanager
+
+- name: Grafana — пароль адміністратора
+  ansible.builtin.copy:
+    dest: "{{ obs_dir }}/grafana/grafana.env"
+    content: "GF_SECURITY_ADMIN_PASSWORD={{ grafana_admin_password }}\n"
+    mode: "0600"
+  no_log: true
+  notify: Restart grafana
+
+- name: Grafana — джерела даних
+  ansible.builtin.template:
+    src: grafana-datasources.yml.j2
+    dest: "{{ obs_dir }}/grafana/provisioning/datasources/datasources.yml"
+    mode: "0644"
+  notify: Restart grafana
+
+- name: Grafana — провайдер дашбордів
+  ansible.builtin.copy:
+    src: grafana-dashboards.yml
+    dest: "{{ obs_dir }}/grafana/provisioning/dashboards/lab9.yml"
+    mode: "0644"
+  notify: Restart grafana
+
+- name: Grafana — дашборди
+  ansible.builtin.copy:
+    src: dashboards/
+    dest: "{{ obs_dir }}/grafana/dashboards/"
+    mode: "0644"
+
+- name: SeaweedFS — ключ шифрування SSE-S3
+  ansible.builtin.template:
+    src: seaweedfs-security.toml.j2
+    dest: "{{ obs_dir }}/seaweedfs/security.toml"
+    mode: "0600"
+  no_log: true
+  notify: Restart seaweedfs
+
+- name: SeaweedFS — обліковий запис S3 для Velero
+  ansible.builtin.template:
+    src: seaweedfs-s3.json.j2
+    dest: "{{ obs_dir }}/seaweedfs/s3.json"
+    mode: "0600"
+  no_log: true
+  notify: Restart seaweedfs
+
+- name: Запустити стек
+  ansible.builtin.command: docker compose -f {{ obs_dir }}/compose.yml up -d --remove-orphans
+  register: compose_up
+  changed_when: compose_up.stderr is search('Created|Recreated|Started')
+
+- name: Перезапустити сервіси зі зміненою конфігурацією
+  ansible.builtin.meta: flush_handlers
+
+- name: Сервіси відповідають
+  ansible.builtin.uri:
+    url: "{{ item }}"
+    status_code: 200
+  register: health
+  until: health.status == 200
+  retries: 30
+  delay: 5
+  loop:
+    - "http://127.0.0.1:{{ port_loki }}/ready"
+    - "http://127.0.0.1:{{ port_prometheus }}/-/ready"
+    - "http://127.0.0.1:{{ port_alertmanager }}/-/ready"
+    - "http://127.0.0.1:{{ port_grafana }}/api/health"
+    - "http://127.0.0.1:8686/health"
+
+- name: S3 API слухає
+  ansible.builtin.wait_for:
+    port: "{{ port_s3 }}"
+    timeout: 120
+
+- name: Скрипт ініціалізації бакета
+  ansible.builtin.template:
+    src: s3-bootstrap.sh.j2
+    dest: "{{ obs_dir }}/seaweedfs/s3-bootstrap.sh"
+    mode: "0700"
+
+- name: Облікові дані S3 для скрипта (лише root)
+  ansible.builtin.copy:
+    dest: "{{ obs_dir }}/.s3-admin.env"
+    content: |
+      AWS_ACCESS_KEY_ID={{ s3_access_key }}
+      AWS_SECRET_ACCESS_KEY={{ s3_secret_key }}
+      AWS_DEFAULT_REGION={{ s3_region }}
+    mode: "0600"
+  no_log: true
+
+- name: Бакет velero з Object Lock і шифруванням
+  ansible.builtin.command: >-
+    docker run --rm --network host
+    -v {{ obs_dir }}/seaweedfs:/work:ro
+    --env-file {{ obs_dir }}/.s3-admin.env
+    --entrypoint /bin/sh {{ images.awscli }} /work/s3-bootstrap.sh
+  register: s3_bootstrap
+  changed_when: "'BUCKET_CREATED' in s3_bootstrap.stdout"
+
+- name: Стан бакета
+  ansible.builtin.debug:
+    var: s3_bootstrap.stdout_lines

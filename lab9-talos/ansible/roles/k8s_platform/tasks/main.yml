@@ -1,0 +1,110 @@
+---
+- name: Простори імен з рівнями Pod Security Admission
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    echo {{ lookup('template', 'namespaces.yaml.j2') | quote }}
+    | kubectl --kubeconfig {{ kubeconfig_path }} apply -f -
+  args:
+    executable: /bin/bash
+  register: ns_apply
+  changed_when: ns_apply.stdout is search('created|configured')
+
+- name: StorageClass local-path (томи на UserVolume Talos)
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: local-path
+    chart_ref: "{{ charts.local_path.name }}"
+    chart_repo_url: "{{ charts.local_path.repo }}"
+    chart_version: "{{ charts.local_path.version }}"
+    release_namespace: local-path-storage
+    values: "{{ lookup('template', 'values/local-path.yaml.j2') | from_yaml }}"
+    wait: true
+    wait_timeout: "{{ helm_wait_timeout }}"
+
+- name: node-exporter — метрики ОС Talos
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: node-exporter
+    chart_ref: "{{ charts.node_exporter.name }}"
+    chart_repo_url: "{{ charts.node_exporter.repo }}"
+    chart_version: "{{ charts.node_exporter.version }}"
+    release_namespace: monitoring
+    values: "{{ lookup('template', 'values/node-exporter.yaml.j2') | from_yaml }}"
+    wait: true
+    wait_timeout: "{{ helm_wait_timeout }}"
+
+- name: kube-state-metrics
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: kube-state-metrics
+    chart_ref: "{{ charts.kube_state_metrics.name }}"
+    chart_repo_url: "{{ charts.kube_state_metrics.repo }}"
+    chart_version: "{{ charts.kube_state_metrics.version }}"
+    release_namespace: monitoring
+    values: "{{ lookup('template', 'values/kube-state-metrics.yaml.j2') | from_yaml }}"
+    wait: true
+    wait_timeout: "{{ helm_wait_timeout }}"
+
+- name: ServiceAccount і RBAC для зовнішнього Prometheus
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    echo {{ lookup('template', 'prometheus-external.yaml.j2') | quote }}
+    | kubectl --kubeconfig {{ kubeconfig_path }} apply -f -
+  args:
+    executable: /bin/bash
+  register: prom_rbac
+  changed_when: prom_rbac.stdout is search('created|configured')
+
+- name: Токен prometheus-external
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ kubeconfig_path }} -n monitoring
+    get secret prometheus-external-token -o jsonpath={.data.token}
+  register: prom_token
+  until: prom_token.stdout | length > 0
+  retries: 10
+  delay: 3
+  changed_when: false
+  no_log: true
+
+- name: Зберегти токен локально (0600) для передачі на ВМ моніторингу
+  ansible.builtin.copy:
+    dest: "{{ secrets_dir }}/k8s-prometheus-token"
+    content: "{{ prom_token.stdout | b64decode }}"
+    mode: "0600"
+  no_log: true
+
+- name: Vector-агент — логи подів і аудит API
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: vector-agent
+    chart_ref: "{{ charts.vector.name }}"
+    chart_repo_url: "{{ charts.vector.repo }}"
+    chart_version: "{{ charts.vector.version }}"
+    release_namespace: logging
+    values: "{{ lookup('template', 'values/vector-agent.yaml.j2') | from_yaml }}"
+    wait: true
+    wait_timeout: "{{ helm_wait_timeout }}"
+
+- name: Falco + falcosidekick
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: falco
+    chart_ref: "{{ charts.falco.name }}"
+    chart_repo_url: "{{ charts.falco.repo }}"
+    chart_version: "{{ charts.falco.version }}"
+    release_namespace: falco
+    values: "{{ lookup('template', 'values/falco.yaml.j2') | from_yaml }}"
+    wait: true
+    wait_timeout: "{{ helm_wait_timeout }}"
+
+- name: Поди платформи
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ kubeconfig_path }} get pods -o wide
+    -n {{ item }}
+  loop: [monitoring, logging, falco, local-path-storage]
+  register: platform_pods
+  changed_when: false
+
+- name: Показати поди
+  ansible.builtin.debug:
+    msg: "{{ platform_pods.results | map(attribute='stdout_lines') | flatten }}"
