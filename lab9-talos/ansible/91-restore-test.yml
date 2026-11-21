@@ -1,5 +1,5 @@
 ---
-- name: Відновлення застосунку demo з резервної копії
+- name: Restore local copies
   hosts: localhost
   connection: local
   gather_facts: false
@@ -8,34 +8,13 @@
     source_backup: lab9-initial
     restore_name: "lab9-restore-{{ lookup('pipe', 'date +%Y%m%d%H%M%S') }}"
   tasks:
-    - name: Дата створення даних у томі до видалення
+    - name: Date
       ansible.builtin.command: "{{ kubectl }} -n demo exec deploy/web -c nginx -- cat /data/created.txt"
       register: before
       changed_when: false
 
-    - name: Видалити простір імен demo (імітація аварії)
-      ansible.builtin.command: "{{ kubectl }} delete namespace demo --wait=true --timeout=300s"
-      changed_when: true
 
-    - name: Створити Restore
-      ansible.builtin.shell: |
-        set -o pipefail
-        cat <<EOF | {{ kubectl }} create -f -
-        apiVersion: velero.io/v1
-        kind: Restore
-        metadata:
-          name: {{ restore_name }}
-          namespace: velero
-        spec:
-          backupName: {{ source_backup }}
-          includedNamespaces: [demo]
-          restorePVs: true
-        EOF
-      args:
-        executable: /bin/bash
-      changed_when: true
-
-    - name: Дочекатися завершення відновлення
+    - name: Wait for restoration
       ansible.builtin.command: "{{ kubectl }} -n velero get restore {{ restore_name }} -o jsonpath={.status.phase}"
       register: restore_phase
       until: restore_phase.stdout in ['Completed', 'PartiallyFailed', 'Failed']
@@ -44,16 +23,16 @@
       changed_when: false
       failed_when: restore_phase.stdout != 'Completed'
 
-    - name: Застосунок знову працює
+    - name: Wors as before
       ansible.builtin.command: "{{ kubectl }} -n demo rollout status deploy/web --timeout=300s"
       changed_when: false
 
-    - name: Дані в томі після відновлення
+    - name: Data after restore
       ansible.builtin.command: "{{ kubectl }} -n demo exec deploy/web -c nginx -- cat /data/created.txt"
       register: after
       changed_when: false
       failed_when: after.stdout != before.stdout
 
-    - name: Результат
+    - name: Result
       ansible.builtin.debug:
         msg: "Дані відновлено: {{ before.stdout }} == {{ after.stdout }}"
