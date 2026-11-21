@@ -1,5 +1,5 @@
 ---
-- name: ВМ моніторингу і бекапів (Ubuntu 24.04)
+- name: VM for monitoring and back-ups (Ubuntu 24.04)
   hosts: monitoring
   become: true
   roles:
