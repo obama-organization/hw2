@@ -1,0 +1,12 @@
+---
+k8s_namespaces:
+  - { name: monitoring, psa: privileged }
+  - { name: logging, psa: privileged }
+  - { name: falco, psa: privileged }
+  - { name: local-path-storage, psa: privileged }
+  - { name: velero, psa: privileged }
+  - { name: demo, psa: restricted }
+
+helm_wait_timeout: 15m
+
+node_exporter_host_rootfs: true

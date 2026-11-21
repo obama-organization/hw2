@@ -1,0 +1,153 @@
+---
+- name: Каталоги для конфігурацій Talos
+  ansible.builtin.file:
+    path: "{{ talos_dir }}/{{ item }}"
+    state: directory
+    mode: "0700"
+  loop: ["", patches, nodes]
+
+- name: Патчі машинної конфігурації (спільний, control plane, worker)
+  ansible.builtin.template:
+    src: "{{ item }}.yaml.j2"
+    dest: "{{ talos_dir }}/patches/{{ item }}.yaml"
+    mode: "0600"
+  loop: [common, controlplane, worker]
+
+- name: Патчі окремих вузлів (hostname)
+  ansible.builtin.template:
+    src: node.yaml.j2
+    dest: "{{ talos_dir }}/patches/node-{{ item }}.yaml"
+    mode: "0600"
+  loop: "{{ groups['talos'] }}"
+
+- name: Секрети кластера (PKI, токени) — генеруються один раз
+  ansible.builtin.command: talosctl gen secrets -o {{ talos_dir }}/secrets.yaml
+  args:
+    creates: "{{ talos_dir }}/secrets.yaml"
+
+- name: Права на секрети
+  ansible.builtin.file:
+    path: "{{ talos_dir }}/secrets.yaml"
+    mode: "0600"
+
+- name: Згенерувати controlplane.yaml, worker.yaml і talosconfig
+  ansible.builtin.command: >-
+    talosctl gen config {{ cluster_name }} https://{{ talos_endpoint }}:6443
+    --with-secrets {{ talos_dir }}/secrets.yaml
+    --talos-version {{ talos_version | regex_replace('^(v[0-9]+\.[0-9]+).*$', '\1') }}
+    --config-patch @{{ talos_dir }}/patches/common.yaml
+    --config-patch-control-plane @{{ talos_dir }}/patches/controlplane.yaml
+    --config-patch-worker @{{ talos_dir }}/patches/worker.yaml
+    --additional-sans {{ talos_endpoint }}
+    --with-docs=false --with-examples=false
+    --output {{ talos_dir }} --force
+  changed_when: false
+
+- name: Конфігурація кожного вузла (базова + hostname)
+  ansible.builtin.command: >-
+    talosctl machineconfig patch {{ talos_dir }}/{{ hostvars[item]['talos_role'] }}.yaml
+    --patch @{{ talos_dir }}/patches/node-{{ item }}.yaml
+    --output {{ talos_dir }}/nodes/{{ item }}.yaml
+  loop: "{{ groups['talos'] }}"
+  changed_when: false
+
+- name: Перевірити конфігурації (talosctl validate)
+  ansible.builtin.command: talosctl validate --config {{ talos_dir }}/nodes/{{ item }}.yaml --mode metal
+  loop: "{{ groups['talos'] }}"
+  changed_when: false
+
+- name: Права на конфігурації вузлів
+  ansible.builtin.file:
+    path: "{{ talos_dir }}/{{ item }}"
+    mode: "0600"
+  loop: [controlplane.yaml, worker.yaml, talosconfig]
+
+- name: talosconfig — endpoints (control plane)
+  ansible.builtin.command: talosctl --talosconfig {{ talosconfig_path }} config endpoint {{ talos_cp_ips | join(' ') }}
+  changed_when: false
+
+- name: talosconfig — вузол за замовчуванням
+  ansible.builtin.command: talosctl --talosconfig {{ talosconfig_path }} config node {{ talos_endpoint }}
+  changed_when: false
+
+- name: Які вузли ще в maintenance mode (приймають insecure-запити)
+  ansible.builtin.command: talosctl -n {{ hostvars[item]['ansible_host'] }} -e {{ hostvars[item]['ansible_host'] }} get disks --insecure
+  loop: "{{ groups['talos'] }}"
+  register: talos_maint
+  changed_when: false
+  failed_when: false
+
+- name: Застосувати конфігурацію до нових вузлів (встановлення Talos на диск)
+  ansible.builtin.command: >-
+    talosctl apply-config --insecure
+    -n {{ hostvars[item.item]['ansible_host'] }} -e {{ hostvars[item.item]['ansible_host'] }}
+    --file {{ talos_dir }}/nodes/{{ item.item }}.yaml
+  loop: "{{ talos_maint.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.rc == 0
+  changed_when: true
+
+- name: Оновити конфігурацію на вже встановлених вузлах
+  ansible.builtin.command: >-
+    talosctl --talosconfig {{ talosconfig_path }} apply-config --mode auto
+    -n {{ hostvars[item.item]['ansible_host'] }} -e {{ hostvars[item.item]['ansible_host'] }}
+    --file {{ talos_dir }}/nodes/{{ item.item }}.yaml
+  loop: "{{ talos_maint.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.rc != 0
+  register: talos_reapply
+  changed_when: talos_reapply.stdout is not search('No changes|no changes') and talos_reapply.stderr is not search('No changes|no changes')
+
+- name: Дочекатися Talos API з mTLS (після встановлення і перезавантаження)
+  ansible.builtin.command: >-
+    talosctl --talosconfig {{ talosconfig_path }} version --short
+    -n {{ hostvars[item]['ansible_host'] }} -e {{ hostvars[item]['ansible_host'] }}
+  loop: "{{ groups['talos'] }}"
+  register: talos_up
+  until: talos_up.rc == 0
+  retries: 90
+  delay: 10
+  changed_when: false
+
+- name: Bootstrap etcd на першому control plane (один раз)
+  ansible.builtin.command: talosctl --talosconfig {{ talosconfig_path }} bootstrap -n {{ talos_endpoint }} -e {{ talos_endpoint }}
+  register: talos_bootstrap
+  until: talos_bootstrap.rc == 0 or 'AlreadyExists' in talos_bootstrap.stderr
+  retries: 20
+  delay: 15
+  failed_when: talos_bootstrap.rc != 0 and 'AlreadyExists' not in talos_bootstrap.stderr
+  changed_when: talos_bootstrap.rc == 0
+
+- name: Отримати kubeconfig
+  ansible.builtin.command: >-
+    talosctl --talosconfig {{ talosconfig_path }} kubeconfig {{ kubeconfig_path }}
+    -n {{ talos_endpoint }} -e {{ talos_endpoint }} --force --merge=false
+  register: talos_kubeconfig
+  until: talos_kubeconfig.rc == 0
+  retries: 30
+  delay: 10
+  changed_when: false
+
+- name: Права на kubeconfig
+  ansible.builtin.file:
+    path: "{{ kubeconfig_path }}"
+    mode: "0600"
+
+- name: Перевірка здоров'я кластера (etcd, control plane, kubelet, вузли Ready)
+  ansible.builtin.command: >-
+    talosctl --talosconfig {{ talosconfig_path }} health --wait-timeout 20m
+    -n {{ talos_endpoint }} -e {{ talos_endpoint }}
+    --control-plane-nodes {{ talos_cp_ips | join(',') }}
+    --worker-nodes {{ talos_worker_ips | join(',') }}
+  changed_when: false
+
+- name: Вузли Kubernetes
+  ansible.builtin.command: kubectl --kubeconfig {{ kubeconfig_path }} get nodes -o wide
+  register: k8s_nodes
+  changed_when: false
+
+- name: Показати вузли
+  ansible.builtin.debug:
+    var: k8s_nodes.stdout_lines

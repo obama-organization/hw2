@@ -1,0 +1,69 @@
+groups:
+  - name: talos-nodes
+    rules:
+      - alert: TalosNodeDown
+        expr: up{job="talos-node-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Вузол Talos {{ $labels.node }} недоступний"
+          description: "node-exporter на {{ $labels.instance }} не відповідає більше 1 хвилини."
+
+      - alert: TalosNodeHighCPU
+        expr: 100 - (avg by (node) (rate(node_cpu_seconds_total{job="talos-node-exporter",mode="idle"}[5m])) * 100) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Високе навантаження CPU на {{ $labels.node }}"
+          description: "CPU {{ $value | printf \"%.0f\" }}% понад 10 хвилин."
+
+      - alert: TalosNodeLowMemory
+        expr: node_memory_MemAvailable_bytes{job="talos-node-exporter"} / node_memory_MemTotal_bytes{job="talos-node-exporter"} < 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Мало вільної пам'яті на {{ $labels.node }}"
+          description: "Доступно менше 10% RAM."
+
+      - alert: TalosNodeDiskFilling
+        expr: |
+          node_filesystem_avail_bytes{job="talos-node-exporter",mountpoint="/var",fstype!~"tmpfs|overlay"}
+            / node_filesystem_size_bytes{job="talos-node-exporter",mountpoint="/var",fstype!~"tmpfs|overlay"} < 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Розділ EPHEMERAL (/var) заповнений на {{ $labels.node }}"
+          description: "Вільно менше 15% місця."
+
+  - name: etcd
+    rules:
+      - alert: EtcdDown
+        expr: up{job="talos-etcd"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "etcd на {{ $labels.node }} не віддає метрики"
+          description: "Metrics endpoint etcd (порт 2381) недоступний."
+
+      - alert: EtcdNoLeader
+        expr: etcd_server_has_leader == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "etcd на {{ $labels.node }} без лідера"
+          description: "Кластер etcd втратив лідера — API Kubernetes не працює."
+
+      - alert: EtcdSlowDisk
+        expr: histogram_quantile(0.99, sum by (le, node) (rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Повільний диск etcd на {{ $labels.node }}"
+          description: "p99 fsync WAL {{ $value | printf \"%.2f\" }} с (норма < 10 мс)."

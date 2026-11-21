@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+service:
+  type: NodePort
+  nodePort: {{ nodeport_ksm }}
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { memory: 128Mi }
+securityContext:
+  enabled: true
+prometheus:
+  monitor:
+    enabled: false

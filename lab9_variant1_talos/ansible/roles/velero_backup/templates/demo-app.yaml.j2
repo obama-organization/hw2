@@ -1,0 +1,92 @@
+# {{ ansible_managed }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-content
+  namespace: demo
+data:
+  index.html: |
+    <!doctype html><html><head><meta charset="utf-8"><title>Lab9 Talos</title></head>
+    <body><h1>Lab 9 — Talos + Vector + Loki + Prometheus + Falco + Velero</h1>
+    <p>Кластер {{ cluster_name }}, Talos {{ talos_version }}</p></body></html>
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-data
+  namespace: demo
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: demo
+  labels: { app: web }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+      annotations:
+        backup.velero.io/backup-volumes: data
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        - name: seed
+          image: busybox:1.37
+          command: ["sh", "-c", "test -f /data/created.txt || date -u > /data/created.txt; date -u >> /data/boots.log"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 5m, memory: 8Mi }
+            limits: { memory: 32Mi }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      containers:
+        - name: nginx
+          image: nginxinc/nginx-unprivileged:1.29-alpine
+          ports: [{ containerPort: 8080 }]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 200m, memory: 64Mi }
+          readinessProbe:
+            httpGet: { path: /, port: 8080 }
+          volumeMounts:
+            - { name: content, mountPath: /usr/share/nginx/html }
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: content
+          configMap: { name: web-content }
+        - name: data
+          persistentVolumeClaim: { claimName: web-data }
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: demo
+spec:
+  selector: { app: web }
+  ports: [{ port: 80, targetPort: 8080 }]

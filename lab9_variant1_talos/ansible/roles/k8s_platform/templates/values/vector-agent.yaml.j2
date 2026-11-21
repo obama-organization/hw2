@@ -1,0 +1,45 @@
+# {{ ansible_managed }}
+role: Agent
+service:
+  enabled: false
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+resources:
+  requests: { cpu: 20m, memory: 64Mi }
+  limits: { cpu: 500m, memory: 256Mi }
+customConfig:
+  data_dir: /vector-data-dir
+  api:
+    enabled: false
+  sources:
+    pods:
+      type: kubernetes_logs
+    apiserver_audit:
+      type: file
+      include:
+        - /var/log/audit/kube/*.log
+      read_from: end
+  transforms:
+    pods_tag:
+      type: remap
+      inputs: [pods]
+      source: |
+        .log_type = "pod"
+        del(.file)
+    audit_tag:
+      type: remap
+      inputs: [apiserver_audit]
+      source: |
+        .log_type = "audit"
+        .node = get_env_var("VECTOR_SELF_NODE_NAME") ?? "unknown"
+  sinks:
+    aggregator:
+      type: vector
+      inputs: [pods_tag, audit_tag]
+      address: "http://{{ mon_ip }}:{{ port_vector_agents }}"
+      buffer:
+        type: disk
+        max_size: 268435488
+        when_full: drop_newest
