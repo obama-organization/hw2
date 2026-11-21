@@ -1,17 +1,17 @@
 ---
-- name: Платформа в кластері (PSA, local-path, метрики, Vector, Falco)
+- name: PSA, local-path, metrics, Vector, Falco
   hosts: localhost
   connection: local
   gather_facts: false
   roles:
     - k8s_platform
 
-- name: Токен Kubernetes для зовнішнього Prometheus
+- name: Token Kubernetes for Prometheus
   hosts: monitoring
   become: true
   gather_facts: false
   tasks:
-    - name: Скопіювати токен ServiceAccount prometheus-external
+    - name: Copy token ServiceAccount prometheus-external
       ansible.builtin.copy:
         src: "{{ secrets_dir }}/k8s-prometheus-token"
         dest: /opt/observability/prometheus/secrets/k8s-token
