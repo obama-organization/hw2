@@ -1,0 +1,40 @@
+# {{ ansible_managed }}
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: loki-webhook
+  group_by: [alertname, node, namespace]
+  group_wait: 30s
+  group_interval: 2m
+  repeat_interval: 4h
+  routes:
+    - receiver: loki-webhook
+      continue: true
+      routes:
+        - matchers: ['alertname="MonitoringHeartbeat"']
+          receiver: loki-webhook
+          repeat_interval: 1h
+{% if telegram_bot_token | length > 0 and telegram_chat_id | length > 0 %}
+    - receiver: telegram
+      matchers: ['severity=~"warning|critical"']
+{% endif %}
+
+inhibit_rules:
+  - source_matchers: ['severity="critical"']
+    target_matchers: ['severity="warning"']
+    equal: [alertname, node]
+
+receivers:
+  - name: loki-webhook
+    webhook_configs:
+      - url: http://127.0.0.1:{{ port_vector_alerts }}/alerts
+        send_resolved: true
+{% if telegram_bot_token | length > 0 and telegram_chat_id | length > 0 %}
+  - name: telegram
+    telegram_configs:
+      - bot_token_file: /etc/alertmanager/secrets/telegram_bot_token
+        chat_id: {{ telegram_chat_id }}
+        parse_mode: HTML
+        send_resolved: true
+{% endif %}

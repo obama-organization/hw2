@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+{% for ns in k8s_namespaces %}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ ns.name }}
+  labels:
+    pod-security.kubernetes.io/enforce: {{ ns.psa }}
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: {{ ns.psa }}
+    app.kubernetes.io/part-of: lab9
+{% endfor %}

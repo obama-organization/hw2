@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+# DHCP лише для першого завантаження вузлів Talos з metal ISO (у мережі лабораторії немає DHCP).
+# Відповідаємо ТІЛЬКИ відомим MAC наших ВМ; інші пристрої мережі не обслуговуються.
+port=0
+interface={{ ansible_default_ipv4.interface }}
+bind-interfaces
+dhcp-range={{ ansible_default_ipv4.network }},static,{{ ansible_default_ipv4.netmask }},12h
+dhcp-option=option:router,{{ lan_gateway }}
+dhcp-option=option:dns-server,{{ talos_dns_servers | join(',') }}
+dhcp-ignore=tag:!known
+log-dhcp
+{% for h in groups['talos'] %}
+dhcp-host={{ hostvars[h]['mac_address'] }},{{ hostvars[h]['ansible_host'] }},{{ h }}
+{% endfor %}

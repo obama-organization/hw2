@@ -1,0 +1,67 @@
+# {{ ansible_managed }}
+cluster:
+  etcd:
+    extraArgs:
+      listen-metrics-urls: http://0.0.0.0:2381
+{% if talos_slow_storage_tuning | bool %}
+      # Сховище local-2TB дає fsync 0,3–3,5 с: без цього API Server не проходить перевірку etcd.
+      # Компроміс для лабораторії: при аварії хоста можна втратити останні записи etcd (є бекапи Velero).
+      unsafe-no-fsync: "true"
+{% endif %}
+---
+apiVersion: v1alpha1
+kind: KubeControllerManagerConfig
+extraArgs:
+  bind-address: 0.0.0.0
+{% if talos_slow_storage_tuning | bool %}
+  # Один control plane: вибори лідера не потрібні, а на повільному etcd вони валять процес
+  leader-elect: "false"
+{% endif %}
+---
+apiVersion: v1alpha1
+kind: KubeSchedulerConfig
+extraArgs:
+  bind-address: 0.0.0.0
+{% if talos_slow_storage_tuning | bool %}
+  # прапорець, а не config: Talos сам додає --leader-elect=true, і прапорець має пріоритет
+  leader-elect: "false"
+---
+apiVersion: v1alpha1
+kind: KubeAPIServerConfig
+extraArgs:
+  etcd-healthcheck-timeout: 10s
+  etcd-readycheck-timeout: 10s
+{% endif %}
+---
+apiVersion: v1alpha1
+kind: KubeProxyConfig
+config:
+  metricsBindAddress: 0.0.0.0:10249
+---
+apiVersion: v1alpha1
+kind: KubeAuditPolicyConfig
+configuration:
+  apiVersion: audit.k8s.io/v1
+  kind: Policy
+  omitStages:
+    - RequestReceived
+  rules:
+    - level: None
+      nonResourceURLs: ["/healthz*", "/readyz*", "/livez*", "/version", "/metrics"]
+    - level: None
+      resources:
+        - group: ""
+          resources: [events]
+        - group: coordination.k8s.io
+          resources: [leases]
+    - level: Metadata
+      resources:
+        - group: ""
+          resources: [secrets, configmaps, serviceaccounts/token]
+    - level: RequestResponse
+      verbs: [create, update, patch, delete]
+      resources:
+        - group: rbac.authorization.k8s.io
+    - level: Request
+      verbs: [create, update, patch, delete, deletecollection]
+    - level: Metadata

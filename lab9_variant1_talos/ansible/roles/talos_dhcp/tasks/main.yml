@@ -1,0 +1,30 @@
+---
+- name: dnsmasq (лише DHCP, DNS вимкнено)
+  ansible.builtin.apt:
+    name: dnsmasq
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Статичні оренди для вузлів Talos за MAC
+  ansible.builtin.template:
+    src: talos-bootstrap.conf.j2
+    dest: /etc/dnsmasq.d/talos-bootstrap.conf
+    mode: "0644"
+    validate: dnsmasq --test -C %s
+  notify: Restart dnsmasq
+
+- name: UFW — DHCP-запити від вузлів (джерело 0.0.0.0 у maintenance mode)
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: "{{ ansible_default_ipv4.interface }}"
+    proto: udp
+    to_port: "67"
+    comment: talos-dhcp-bootstrap
+
+- name: dnsmasq увімкнено
+  ansible.builtin.systemd_service:
+    name: dnsmasq
+    state: started
+    enabled: true

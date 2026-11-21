@@ -1,0 +1,4 @@
+---
+obs_dir: /opt/observability
+# entrypoint образу SeaweedFS запускає weed від користувача seaweed (uid 1000)
+seaweedfs_uid: 1000

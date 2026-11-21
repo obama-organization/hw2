@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "velero",
+      "credentials": [
+        {
+          "accessKey": "{{ s3_access_key }}",
+          "secretKey": "{{ s3_secret_key }}"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

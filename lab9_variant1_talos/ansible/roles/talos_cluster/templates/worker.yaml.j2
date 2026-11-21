@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: local-path-provisioner
+provisioning:
+  diskSelector:
+    match: "{{ talos_data_disk_selector }}"
+  minSize: 2GB
+  grow: true

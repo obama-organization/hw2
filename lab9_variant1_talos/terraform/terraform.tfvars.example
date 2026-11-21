@@ -1,0 +1,15 @@
+proxmox_endpoint = "https://192.168.5.200:8006/"
+node_name        = "pve"
+vm_datastore     = "local-2TB"
+iso_datastore    = "local"
+disk_format      = "qcow2"
+
+cluster_name = "team7"
+
+mon_vm = { ip = "192.168.5.71", cores = 2, memory = 2048, disk = 30 }
+
+talos_nodes = {
+  "cp-1" = { role = "controlplane", ip = "192.168.5.72", cores = 2, memory = 2048, disk = 20, data_disk = 0 }
+  "w-1"  = { role = "worker", ip = "192.168.5.73", cores = 2, memory = 2048, disk = 20, data_disk = 10 }
+  "w-2"  = { role = "worker", ip = "192.168.5.74", cores = 2, memory = 2048, disk = 20, data_disk = 10 }
+}

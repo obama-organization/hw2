@@ -1,0 +1,28 @@
+groups:
+  - name: monitoring-pipeline
+    rules:
+      - alert: MonitoringHeartbeat
+        expr: vector(1)
+        labels:
+          severity: info
+        annotations:
+          summary: "Heartbeat системи моніторингу"
+          description: "Цей алерт активний завжди. Якщо він перестав надходити — зламався ланцюжок доставки алертів."
+
+      - alert: ScrapeTargetDown
+        expr: up{job!~"talos-node-exporter|talos-etcd"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ціль {{ $labels.job }} ({{ $labels.instance }}) недоступна"
+          description: "Prometheus не може зібрати метрики понад 5 хвилин."
+
+      - alert: TalosLogsNotReceived
+        expr: sum(rate(vector_component_received_events_total{component_id=~"talos_kernel|talos_service"}[10m])) == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Vector не отримує логи від Talos"
+          description: "За 15 хвилин від вузлів Talos не надійшло жодного рядка логів."

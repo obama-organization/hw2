@@ -1,0 +1,26 @@
+---
+- name: Платформа в кластері (PSA, local-path, метрики, Vector, Falco)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - k8s_platform
+
+- name: Токен Kubernetes для зовнішнього Prometheus
+  hosts: monitoring
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Скопіювати токен ServiceAccount prometheus-external
+      ansible.builtin.copy:
+        src: "{{ secrets_dir }}/k8s-prometheus-token"
+        dest: /opt/observability/prometheus/secrets/k8s-token
+        owner: "65534"
+        group: "65534"
+        mode: "0400"
+      notify: Restart prometheus
+
+  handlers:
+    - name: Restart prometheus
+      ansible.builtin.command: docker compose -f /opt/observability/compose.yml restart prometheus
+      changed_when: true
