@@ -1,0 +1,199 @@
+data_dir: /var/lib/vector
+
+api:
+  enabled: true
+  address: 127.0.0.1:8686
+
+enrichment_tables:
+  talos_nodes:
+    type: file
+    file:
+      path: /etc/vector/nodes.csv
+      encoding:
+        type: csv
+    schema:
+      ip: string
+      node: string
+      role: string
+
+sources:
+  talos_kernel:
+    type: socket
+    mode: tcp
+    address: 0.0.0.0:6050
+    decoding:
+      codec: json
+    framing:
+      method: newline_delimited
+
+  talos_service:
+    type: socket
+    mode: tcp
+    address: 0.0.0.0:6051
+    decoding:
+      codec: json
+    framing:
+      method: newline_delimited
+
+  k8s_agents:
+    type: vector
+    address: 0.0.0.0:6000
+
+  alertmanager_webhook:
+    type: http_server
+    address: 0.0.0.0:8687
+    path: /alerts
+    method: POST
+    decoding:
+      codec: json
+
+  self_metrics:
+    type: internal_metrics
+
+transforms:
+  talos_norm:
+    type: remap
+    inputs: [talos_kernel, talos_service]
+    source: |
+      raw_host = to_string(.host) ?? "unknown"
+      parts = split(raw_host, ":")
+      ip = to_string(parts[0])
+      row, err = get_enrichment_table_record("talos_nodes", {"ip": ip})
+      if err == null {
+        .node = row.node
+        .role = row.role
+      } else {
+        .node = ip
+        .role = "unknown"
+      }
+      if exists(.facility) || exists(.seq) {
+        .stream = "kernel"
+        .service = "kernel"
+      } else {
+        .stream = "service"
+        .service = to_string(."talos-service") ?? "talos"
+      }
+      .level = downcase(to_string(."talos-level") ?? "info")
+      .message = to_string(.msg) ?? encode_json(.)
+      ts, terr = parse_timestamp(to_string(."talos-time") ?? "", "%+")
+      if terr == null {
+        .timestamp = ts
+      }
+      del(.msg)
+      del(."talos-time")
+      del(."talos-level")
+      del(."talos-service")
+      del(.source_type)
+
+  k8s_split:
+    type: route
+    inputs: [k8s_agents]
+    reroute_unmatched: false
+    route:
+      audit: .log_type == "audit"
+      pods: .log_type != "audit"
+
+  k8s_pods_norm:
+    type: remap
+    inputs: [k8s_split.pods]
+    source: |
+      .namespace = to_string(.kubernetes.pod_namespace) ?? "unknown"
+      .pod = to_string(.kubernetes.pod_name) ?? "unknown"
+      .container = to_string(.kubernetes.container_name) ?? "unknown"
+      .node = to_string(.kubernetes.pod_node_name) ?? "unknown"
+
+  k8s_audit_norm:
+    type: remap
+    inputs: [k8s_split.audit]
+    source: |
+      ev, err = parse_json(.message)
+      if err == null && is_object(ev) {
+        .verb = to_string(ev.verb) ?? "unknown"
+        .user = to_string(ev.user.username) ?? ""
+        .resource = to_string(ev.objectRef.resource) ?? ""
+        .ns = to_string(ev.objectRef.namespace) ?? ""
+        .code = ev.responseStatus.code
+      } else {
+        .verb = "unknown"
+      }
+      .node = to_string(.node) ?? "unknown"
+
+  alerts_norm:
+    type: remap
+    inputs: [alertmanager_webhook]
+    source: |
+      receiver = to_string(.receiver) ?? ""
+      alerts = array(.alerts) ?? []
+      . = map_values(alerts) -> |a| {
+        labels = object(a.labels) ?? {}
+        ann = object(a.annotations) ?? {}
+        {
+          "alertname": to_string(labels.alertname) ?? "unknown",
+          "severity": to_string(labels.severity) ?? "none",
+          "status": to_string(a.status) ?? "unknown",
+          "receiver": receiver,
+          "labels": labels,
+          "summary": to_string(ann.summary) ?? "",
+          "description": to_string(ann.description) ?? "",
+          "starts_at": a.startsAt,
+          "ends_at": a.endsAt,
+          "message": (to_string(a.status) ?? "") + " " + (to_string(labels.alertname) ?? "") + ": " + (to_string(ann.summary) ?? "")
+        }
+      }
+
+sinks:
+  loki_talos:
+    type: loki
+    inputs: [talos_norm]
+    endpoint: http://127.0.0.1:3100
+    encoding:
+      codec: json
+    labels:
+      job: talos
+      node: "{{ node }}"
+      role: "{{ role }}"
+      stream: "{{ stream }}"
+      service: "{{ service }}"
+      level: "{{ level }}"
+    remove_label_fields: true
+
+  loki_k8s:
+    type: loki
+    inputs: [k8s_pods_norm]
+    endpoint: http://127.0.0.1:3100
+    encoding:
+      codec: text
+    labels:
+      job: kubernetes
+      namespace: "{{ namespace }}"
+      pod: "{{ pod }}"
+      container: "{{ container }}"
+      node: "{{ node }}"
+
+  loki_audit:
+    type: loki
+    inputs: [k8s_audit_norm]
+    endpoint: http://127.0.0.1:3100
+    encoding:
+      codec: text
+    labels:
+      job: k8s-audit
+      verb: "{{ verb }}"
+      node: "{{ node }}"
+
+  loki_alerts:
+    type: loki
+    inputs: [alerts_norm]
+    endpoint: http://127.0.0.1:3100
+    encoding:
+      codec: json
+    labels:
+      job: alertmanager
+      alertname: "{{ alertname }}"
+      severity: "{{ severity }}"
+      status: "{{ status }}"
+
+  prometheus:
+    type: prometheus_exporter
+    inputs: [self_metrics]
+    address: 0.0.0.0:9598

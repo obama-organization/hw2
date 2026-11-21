@@ -1,0 +1,95 @@
+---
+- name: Check logs, metrics, Falco alerts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kubectl: "kubectl --kubeconfig {{ kubeconfig_path }}"
+    loki: "http://{{ mon_ip }}:{{ port_loki }}"
+    prom: "http://{{ mon_ip }}:{{ port_prometheus }}"
+    am: "http://{{ mon_ip }}:{{ port_alertmanager }}"
+    cleanup: true
+  tasks:
+    - name: Logs Talos are in Loki
+      ansible.builtin.uri:
+        url: "{{ loki }}/loki/api/v1/query?query={{ 'sum by (node, stream) (count_over_time({job=\"talos\"}[15m]))' | urlencode }}"
+        return_content: true
+      register: talos_logs
+      until: talos_logs.json.data.result | length > 0
+      retries: 20
+      delay: 15
+
+    - name: Stream Talos
+      ansible.builtin.debug:
+        msg: "{{ talos_logs.json.data.result | map(attribute='metric') | list }}"
+
+    - name: Unreachable targets Prometheus
+      ansible.builtin.uri:
+        url: "{{ prom }}/api/v1/query?query={{ 'up == 0' | urlencode }}"
+        return_content: true
+      register: down_targets
+
+    - name: Метрики Talos (node-exporter, etcd) і kube-state-metrics збираються
+      ansible.builtin.uri:
+        url: "{{ prom }}/api/v1/query?query={{ ('count by (job) (up{job=~\"talos-node-exporter|talos-etcd|kube-state-metrics\"} == 1)') | urlencode }}"
+        return_content: true
+      register: key_targets
+      failed_when: key_targets.json.data.result | length < 3
+
+    - name: Тестовий под для Falco
+      ansible.builtin.command: >-
+        {{ kubectl }} -n default run falco-test --image=alpine:3.22 --restart=Never
+        --labels=purpose=falco-test -- sleep 900
+      register: falco_pod
+      changed_when: falco_pod.rc == 0
+      failed_when: falco_pod.rc != 0 and 'AlreadyExists' not in falco_pod.stderr
+
+    - name: Pod falco-test 
+      ansible.builtin.command: "{{ kubectl }} -n default wait pod/falco-test --for=condition=Ready --timeout=180s"
+      changed_when: false
+
+    - name: Read /etc/shadow and in /etc  (rools Falco)
+      ansible.builtin.command: "{{ kubectl }} -n default exec falco-test -- sh -c 'cat /etc/shadow >/dev/null; echo lab9 >> /etc/lab9-falco-test'"
+      changed_when: true
+
+    - name: Events Falco в Loki
+      ansible.builtin.uri:
+        url: "{{ loki }}/loki/api/v1/query?query={{ 'sum by (rule, priority) (count_over_time({rule=~\".+\"}[15m]))' | urlencode }}"
+        return_content: true
+      register: falco_events
+      until: falco_events.json.data.result | length > 0
+      retries: 20
+      delay: 10
+
+    - name: Show Falco events
+      ansible.builtin.debug:
+        msg: "{{ falco_events.json.data.result | map(attribute='metric') | list }}"
+
+    - name: Алерт від Falco в Alertmanager
+      ansible.builtin.uri:
+        url: "{{ am }}/api/v2/alerts?filter={{ 'source=\"falco\"' | urlencode }}"
+        return_content: true
+      register: falco_alerts
+      until: falco_alerts.json | length > 0
+      retries: 20
+      delay: 10
+
+
+    - name: Alert delivered (webhook -> Vector -> Loki)
+      ansible.builtin.uri:
+        url: "{{ loki }}/loki/api/v1/query?query={{ 'sum by (alertname, status) (count_over_time({job=\"alertmanager\"}[30m]))' | urlencode }}"
+        return_content: true
+      register: delivered
+      until: delivered.json.data.result | selectattr('metric.alertname', 'equalto', 'KubePodCrashLooping') | list | length > 0
+      retries: 20
+      delay: 15
+
+    - name: Доставлені сповіщення
+      ansible.builtin.debug:
+        msg: "{{ delivered.json.data.result | map(attribute='metric') | list }}"
+
+    - name: Прибрати тестові поди
+      ansible.builtin.command: "{{ kubectl }} delete pod {{ item }} --ignore-not-found --wait=false"
+      loop: ["-n demo alert-test-crashloop", "-n default falco-test"]
+      when: cleanup | bool
+      changed_when: true

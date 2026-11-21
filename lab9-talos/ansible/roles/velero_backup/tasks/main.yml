@@ -1,0 +1,89 @@
+---
+- name: Сертифікат S3 отримано з ВМ моніторингу
+  ansible.builtin.stat:
+    path: "{{ secrets_dir }}/s3-ca.crt"
+  register: s3_ca
+  failed_when: not s3_ca.stat.exists
+
+- name: Власний пароль шифрування репозиторію Kopia
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    kubectl --kubeconfig {{ kubeconfig_path }} -n velero create secret generic velero-repo-credentials
+    --from-literal=repository-password={{ velero_repo_password | quote }}
+    --dry-run=client -o yaml
+    | kubectl --kubeconfig {{ kubeconfig_path }} apply -f -
+  args:
+    executable: /bin/bash
+  register: repo_secret
+  changed_when: repo_secret.stdout is search('created|configured')
+  no_log: true
+
+- name: Velero (сервер, node-agent, розклади, BSL -> S3)
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: velero
+    chart_ref: "{{ charts.velero.name }}"
+    chart_repo_url: "{{ charts.velero.repo }}"
+    chart_version: "{{ charts.velero.version }}"
+    release_namespace: velero
+    values: "{{ lookup('template', 'velero-values.yaml.j2') | from_yaml }}"
+    wait: true
+    wait_timeout: 15m
+  no_log: true
+
+- name: BackupStorageLocation доступне
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ kubeconfig_path }} -n velero
+    get backupstoragelocation default -o jsonpath={.status.phase}
+  register: bsl
+  until: bsl.stdout == 'Available'
+  retries: 30
+  delay: 10
+  changed_when: false
+
+- name: Тестовий застосунок з PVC
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    echo {{ lookup('template', 'demo-app.yaml.j2') | quote }}
+    | kubectl --kubeconfig {{ kubeconfig_path }} apply -f -
+  args:
+    executable: /bin/bash
+  register: demo_apply
+  changed_when: demo_apply.stdout is search('created|configured')
+
+- name: Застосунок запущено
+  ansible.builtin.command: kubectl --kubeconfig {{ kubeconfig_path }} -n demo rollout status deploy/web --timeout=300s
+  changed_when: false
+
+- name: Перший бекап кластера (поза розкладом)
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    echo {{ lookup('template', 'backup.yaml.j2') | quote }}
+    | kubectl --kubeconfig {{ kubeconfig_path }} create -f -
+  args:
+    executable: /bin/bash
+  vars:
+    velero_backup_name: "lab9-initial"
+  register: backup_create
+  changed_when: backup_create.rc == 0
+  failed_when: backup_create.rc != 0 and 'AlreadyExists' not in backup_create.stderr
+
+- name: Дочекатися завершення бекапу
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ kubeconfig_path }} -n velero
+    get backup lab9-initial -o jsonpath={.status.phase}
+  register: backup_phase
+  until: backup_phase.stdout in ['Completed', 'PartiallyFailed', 'Failed', 'FailedValidation']
+  retries: 60
+  delay: 10
+  changed_when: false
+  failed_when: backup_phase.stdout != 'Completed'
+
+- name: Розклади і бекапи
+  ansible.builtin.command: kubectl --kubeconfig {{ kubeconfig_path }} -n velero get schedules,backups
+  register: velero_state
+  changed_when: false
+
+- name: Показати стан Velero
+  ansible.builtin.debug:
+    var: velero_state.stdout_lines

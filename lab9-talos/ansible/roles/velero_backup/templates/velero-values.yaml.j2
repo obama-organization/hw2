@@ -1,0 +1,72 @@
+# {{ ansible_managed }}
+initContainers:
+  - name: velero-plugin-for-aws
+    image: {{ velero_plugin_aws_image }}
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - mountPath: /target
+        name: plugins
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+
+configuration:
+  backupStorageLocation:
+    - name: default
+      provider: aws
+      bucket: {{ velero_bucket }}
+      prefix: {{ velero_prefix }}
+      default: true
+      caCert: {{ lookup('ansible.builtin.file', secrets_dir ~ '/s3-ca.crt') | b64encode }}
+      config:
+        region: {{ s3_region }}
+        s3ForcePathStyle: "true"
+        s3Url: https://{{ mon_ip }}:{{ port_s3 }}
+  volumeSnapshotLocation: []
+  uploaderType: kopia
+  defaultBackupTTL: {{ velero_backup_ttl }}
+
+credentials:
+  useSecret: true
+  secretContents:
+    cloud: |
+      [default]
+      aws_access_key_id={{ s3_access_key }}
+      aws_secret_access_key={{ s3_secret_key }}
+
+snapshotsEnabled: false
+
+deployNodeAgent: true
+nodeAgent:
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+metrics:
+  enabled: true
+  service:
+    type: NodePort
+    nodePort: {{ nodeport_velero_metrics }}
+
+schedules:
+  daily-cluster:
+    disabled: false
+    schedule: "0 2 * * *"
+    useOwnerReferencesInBackup: false
+    template:
+      ttl: {{ velero_backup_ttl }}
+      storageLocation: default
+      includedNamespaces: ["*"]
+      defaultVolumesToFsBackup: true
+      snapshotVolumes: false
+  demo-hourly:
+    disabled: false
+    schedule: "0 * * * *"
+    useOwnerReferencesInBackup: false
+    template:
+      ttl: 48h
+      storageLocation: default
+      includedNamespaces: [demo]
+      defaultVolumesToFsBackup: true
+      snapshotVolumes: false

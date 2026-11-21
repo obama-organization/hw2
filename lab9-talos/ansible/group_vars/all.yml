@@ -1,0 +1,89 @@
+---
+state_dir: "{{ playbook_dir }}/../.state"
+talos_dir: "{{ state_dir }}/talos"
+secrets_dir: "{{ state_dir }}/secrets"
+kubeconfig_path: "{{ state_dir }}/kubeconfig"
+talosconfig_path: "{{ talos_dir }}/talosconfig"
+
+mon_host: "{{ groups['monitoring'][0] }}"
+mon_ip: "{{ hostvars[groups['monitoring'][0]]['ansible_host'] }}"
+talos_cp_ips: "{{ groups['talos_controlplane'] | map('extract', hostvars, 'ansible_host') | list }}"
+talos_worker_ips: "{{ groups['talos_workers'] | map('extract', hostvars, 'ansible_host') | list }}"
+talos_all_ips: "{{ talos_cp_ips + talos_worker_ips }}"
+talos_endpoint: "{{ talos_cp_ips[0] }}"
+talos_installer_image: "factory.talos.dev/{{ talos_platform | default('nocloud') }}-installer/{{ talos_schematic_id }}:{{ talos_version }}"
+# metal: у мережі лабораторії немає DHCP, тому dnsmasq на ВМ моніторингу видає вузлам Talos
+# адреси лише за їхніми MAC (для maintenance mode), а після встановлення адреси статичні
+talos_dhcp_bootstrap: "{{ (talos_platform | default('nocloud')) == 'metal' }}"
+talos_dns_servers: [8.8.8.8, 1.1.1.1]
+
+admin_cidrs:
+  - 192.168.5.0/24
+  - 192.168.10.0/24
+
+port_grafana: 3000
+port_loki: 3100
+port_prometheus: 9090
+port_alertmanager: 9093
+port_node_exporter: 9100
+port_vector_kmsg: 6050
+port_vector_service: 6051
+port_vector_agents: 6000
+port_vector_alerts: 8687
+port_vector_metrics: 9598
+port_s3: 8333
+
+nodeport_ksm: 30080
+nodeport_velero_metrics: 30085
+
+images:
+  loki: grafana/loki:3.7.10
+  grafana: grafana/grafana:13.3.1
+  prometheus: prom/prometheus:v3.16.0
+  alertmanager: prom/alertmanager:v0.35.0
+  vector: timberio/vector:0.62.0-debian
+  node_exporter: prom/node-exporter:v1.12.1
+  seaweedfs: chrislusf/seaweedfs:4.54
+  awscli: amazon/aws-cli:2.39.7
+
+charts:
+  local_path:
+    repo: https://charts.containeroo.ch
+    name: local-path-provisioner
+    version: 0.0.38
+  node_exporter:
+    repo: https://prometheus-community.github.io/helm-charts
+    name: prometheus-node-exporter
+    version: 5.1.0
+  kube_state_metrics:
+    repo: https://prometheus-community.github.io/helm-charts
+    name: kube-state-metrics
+    version: 9.0.1
+  vector:
+    repo: https://helm.vector.dev
+    name: vector
+    version: 0.62.0
+  falco:
+    repo: https://falcosecurity.github.io/charts
+    name: falco
+    version: 9.2.2
+  velero:
+    repo: https://vmware-tanzu.github.io/helm-charts
+    name: velero
+    version: 12.2.5
+
+velero_plugin_aws_image: velero/velero-plugin-for-aws:v1.14.4
+
+s3_region: us-east-1
+velero_bucket: velero
+velero_prefix: "{{ cluster_name }}"
+s3_object_lock_days: 7
+velero_backup_ttl: 168h
+
+grafana_admin_password: "{{ lookup('ansible.builtin.password', secrets_dir ~ '/grafana_admin_password', length=24, chars=['ascii_letters', 'digits']) }}"
+s3_access_key: "{{ lookup('ansible.builtin.password', secrets_dir ~ '/s3_access_key', length=20, chars=['ascii_uppercase', 'digits']) }}"
+s3_secret_key: "{{ lookup('ansible.builtin.password', secrets_dir ~ '/s3_secret_key', length=40, chars=['ascii_letters', 'digits']) }}"
+s3_sse_kek: "{{ lookup('ansible.builtin.password', secrets_dir ~ '/s3_sse_kek', length=64, chars=['digits', 'abcdef']) }}"
+
+telegram_bot_token: "{{ lookup('ansible.builtin.env', 'TG_BOT_TOKEN', default='') }}"
+telegram_chat_id: "{{ lookup('ansible.builtin.env', 'TG_CHAT_ID', default='') }}"

@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: local-path-provisioner
+provisioning:
+  diskSelector:
+    match: "!system_disk"
+  minSize: 2GB
+  grow: true

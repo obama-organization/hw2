@@ -1,0 +1,38 @@
+---
+- name: Restore local copies
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    kubectl: "kubectl --kubeconfig {{ kubeconfig_path }}"
+    source_backup: lab9-initial
+    restore_name: "lab9-restore-{{ lookup('pipe', 'date +%Y%m%d%H%M%S') }}"
+  tasks:
+    - name: Date
+      ansible.builtin.command: "{{ kubectl }} -n demo exec deploy/web -c nginx -- cat /data/created.txt"
+      register: before
+      changed_when: false
+
+
+    - name: Wait for restoration
+      ansible.builtin.command: "{{ kubectl }} -n velero get restore {{ restore_name }} -o jsonpath={.status.phase}"
+      register: restore_phase
+      until: restore_phase.stdout in ['Completed', 'PartiallyFailed', 'Failed']
+      retries: 60
+      delay: 10
+      changed_when: false
+      failed_when: restore_phase.stdout != 'Completed'
+
+    - name: Wors as before
+      ansible.builtin.command: "{{ kubectl }} -n demo rollout status deploy/web --timeout=300s"
+      changed_when: false
+
+    - name: Data after restore
+      ansible.builtin.command: "{{ kubectl }} -n demo exec deploy/web -c nginx -- cat /data/created.txt"
+      register: after
+      changed_when: false
+      failed_when: after.stdout != before.stdout
+
+    - name: Result
+      ansible.builtin.debug:
+        msg: "Дані відновлено: {{ before.stdout }} == {{ after.stdout }}"

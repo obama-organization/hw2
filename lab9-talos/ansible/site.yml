@@ -1,0 +1,6 @@
+---
+- import_playbook: 00-preflight.yml
+- import_playbook: 10-monitoring-host.yml
+- import_playbook: 20-talos-cluster.yml
+- import_playbook: 30-k8s-platform.yml
+- import_playbook: 40-velero.yml

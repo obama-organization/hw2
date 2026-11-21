@@ -1,0 +1,30 @@
+---
+- name: check vm availability
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: check installed utilities
+      ansible.builtin.command: "which {{ item }}"
+      changed_when: false
+      loop: [talosctl, kubectl, helm]
+
+    - name: dirs for secrets
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop: ["{{ state_dir }}", "{{ talos_dir }}", "{{ secrets_dir }}"]
+
+    - name: Vm is reachable via SSH
+      ansible.builtin.wait_for:
+        host: "{{ mon_ip }}"
+        port: 22
+        timeout: 600
+
+    - name: Talos OS is available via port 50000
+      ansible.builtin.wait_for:
+        host: "{{ item }}"
+        port: 50000
+        timeout: 900
+      loop: "{{ talos_all_ips }}"

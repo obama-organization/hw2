@@ -1,0 +1,60 @@
+# {{ ansible_managed }}
+driver:
+  kind: modern_ebpf
+  loader:
+    enabled: false
+tty: true
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { cpu: 500m, memory: 512Mi }
+
+falco:
+  priority: notice
+  json_output: true
+  json_include_output_property: true
+
+customRules:
+  lab9-rules.yaml: |-
+    - rule: Lab9 interactive shell in workload container
+      desc: Інтерактивна оболонка (kubectl exec -it) у контейнері робочого навантаження
+      condition: >
+        spawned_process and container and shell_procs and proc.tty != 0
+        and not k8s.ns.name in (kube-system, falco)
+      output: >
+        Shell у контейнері (user=%user.name ns=%k8s.ns.name pod=%k8s.pod.name
+        container=%container.name cmdline=%proc.cmdline image=%container.image.repository)
+      priority: WARNING
+      tags: [lab9, container, shell, mitre_execution]
+
+    - rule: Lab9 write to etc in container
+      desc: Запис у /etc всередині контейнера (зміна конфігурації в runtime)
+      condition: >
+        open_write and container and fd.name startswith /etc/
+        and not k8s.ns.name in (kube-system, falco)
+      output: >
+        Запис у /etc у контейнері (file=%fd.name ns=%k8s.ns.name pod=%k8s.pod.name
+        cmdline=%proc.cmdline image=%container.image.repository)
+      priority: WARNING
+      tags: [lab9, container, filesystem, mitre_persistence]
+
+falcosidekick:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+  webui:
+    enabled: false
+  config:
+    loki:
+      hostport: http://{{ mon_ip }}:{{ port_loki }}
+      format: json
+      minimumpriority: notice
+      grafanaDashboard:
+        enabled: false
+    alertmanager:
+      hostport: http://{{ mon_ip }}:{{ port_alertmanager }}
+      endpoint: /api/v2/alerts
+      minimumpriority: warning
+      expireafter: "900"
+      extralabels: "source:falco,cluster:{{ cluster_name }}"

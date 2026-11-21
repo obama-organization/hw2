@@ -1,0 +1,23 @@
+#!/bin/sh
+# {{ ansible_managed }}
+set -eu
+S3="aws --endpoint-url https://{{ ansible_host }}:{{ port_s3 }} --ca-bundle /work/certs/s3.crt"
+B="{{ velero_bucket }}"
+
+if $S3 s3api head-bucket --bucket "$B" >/dev/null 2>&1; then
+  echo "BUCKET_EXISTS $B"
+else
+  $S3 s3api create-bucket --bucket "$B" --object-lock-enabled-for-bucket
+  echo "BUCKET_CREATED $B"
+fi
+
+$S3 s3api put-object-lock-configuration --bucket "$B" \
+  --object-lock-configuration '{"ObjectLockEnabled":"Enabled","Rule":{"DefaultRetention":{"Mode":"GOVERNANCE","Days":{{ s3_object_lock_days }}}}}'
+
+$S3 s3api put-bucket-encryption --bucket "$B" \
+  --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}' \
+  || echo "WARN: SSE не підтримується сховищем"
+
+echo "--- versioning"; $S3 s3api get-bucket-versioning --bucket "$B"
+echo "--- object lock"; $S3 s3api get-object-lock-configuration --bucket "$B"
+echo "--- encryption"; $S3 s3api get-bucket-encryption --bucket "$B" || true

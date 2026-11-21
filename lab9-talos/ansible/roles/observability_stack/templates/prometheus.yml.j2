@@ -1,0 +1,120 @@
+# {{ ansible_managed }}
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    cluster: {{ cluster_name }}
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["127.0.0.1:{{ port_alertmanager }}"]
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs: [{ targets: ["127.0.0.1:{{ port_prometheus }}"] }]
+  - job_name: alertmanager
+    static_configs: [{ targets: ["127.0.0.1:{{ port_alertmanager }}"] }]
+  - job_name: loki
+    static_configs: [{ targets: ["127.0.0.1:{{ port_loki }}"] }]
+  - job_name: vector
+    static_configs: [{ targets: ["127.0.0.1:{{ port_vector_metrics }}"] }]
+  - job_name: grafana
+    static_configs: [{ targets: ["127.0.0.1:{{ port_grafana }}"] }]
+  - job_name: mon-node
+    static_configs:
+      - targets: ["127.0.0.1:{{ port_node_exporter }}"]
+        labels: { node: "{{ mon_host }}", role: monitoring }
+
+  - job_name: talos-node-exporter
+    static_configs:
+{% for h in groups['talos_controlplane'] + groups['talos_workers'] %}
+      - targets: ["{{ hostvars[h]['ansible_host'] }}:9100"]
+        labels: { node: "{{ h }}", role: "{{ hostvars[h]['talos_role'] }}" }
+{% endfor %}
+
+  - job_name: talos-etcd
+    static_configs:
+{% for h in groups['talos_controlplane'] %}
+      - targets: ["{{ hostvars[h]['ansible_host'] }}:2381"]
+        labels: { node: "{{ h }}" }
+{% endfor %}
+
+  - job_name: kube-proxy
+    static_configs:
+{% for h in groups['talos_controlplane'] + groups['talos_workers'] %}
+      - targets: ["{{ hostvars[h]['ansible_host'] }}:10249"]
+        labels: { node: "{{ h }}" }
+{% endfor %}
+
+  - job_name: kube-state-metrics
+    honor_labels: true
+    static_configs:
+      - targets: ["{{ talos_endpoint }}:{{ nodeport_ksm }}"]
+
+  - job_name: velero
+    static_configs:
+      - targets: ["{{ talos_endpoint }}:{{ nodeport_velero_metrics }}"]
+
+  - job_name: kube-apiserver
+    scheme: https
+    tls_config: { insecure_skip_verify: true }
+    authorization: { credentials_file: /etc/prometheus/secrets/k8s-token }
+    static_configs:
+{% for h in groups['talos_controlplane'] %}
+      - targets: ["{{ hostvars[h]['ansible_host'] }}:6443"]
+        labels: { node: "{{ h }}" }
+{% endfor %}
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "apiserver_request_total|apiserver_request_duration_seconds_bucket|apiserver_current_inflight_requests|apiserver_audit_event_total|up"
+        action: keep
+
+  - job_name: kube-controller-manager
+    scheme: https
+    tls_config: { insecure_skip_verify: true }
+    authorization: { credentials_file: /etc/prometheus/secrets/k8s-token }
+    static_configs:
+{% for h in groups['talos_controlplane'] %}
+      - targets: ["{{ hostvars[h]['ansible_host'] }}:10257"]
+        labels: { node: "{{ h }}" }
+{% endfor %}
+
+  - job_name: kube-scheduler
+    scheme: https
+    tls_config: { insecure_skip_verify: true }
+    authorization: { credentials_file: /etc/prometheus/secrets/k8s-token }
+    static_configs:
+{% for h in groups['talos_controlplane'] %}
+      - targets: ["{{ hostvars[h]['ansible_host'] }}:10259"]
+        labels: { node: "{{ h }}" }
+{% endfor %}
+
+  - job_name: kubelet
+    scheme: https
+    tls_config: { insecure_skip_verify: true }
+    authorization: { credentials_file: /etc/prometheus/secrets/k8s-token }
+    static_configs:
+{% for h in groups['talos_controlplane'] + groups['talos_workers'] %}
+      - targets: ["{{ hostvars[h]['ansible_host'] }}:10250"]
+        labels: { node: "{{ h }}" }
+{% endfor %}
+
+  - job_name: kubelet-cadvisor
+    scheme: https
+    metrics_path: /metrics/cadvisor
+    tls_config: { insecure_skip_verify: true }
+    authorization: { credentials_file: /etc/prometheus/secrets/k8s-token }
+    static_configs:
+{% for h in groups['talos_controlplane'] + groups['talos_workers'] %}
+      - targets: ["{{ hostvars[h]['ansible_host'] }}:10250"]
+        labels: { node: "{{ h }}" }
+{% endfor %}
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_network_(receive|transmit)_bytes_total"
+        action: keep

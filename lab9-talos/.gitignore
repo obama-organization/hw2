@@ -1,0 +1,14 @@
+.state/
+*.tfvars
+!*.tfvars.example
+*.tfstate
+*.tfstate.*
+.terraform/
+crash.log
+*.conf
+talosconfig
+kubeconfig
+secrets.yaml
+ansible/inventory/hosts.yml
+*.retry
+__pycache__/

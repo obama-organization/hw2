@@ -1,0 +1,7 @@
+ip,node,role
+{% for h in groups['talos_controlplane'] %}
+{{ hostvars[h]['ansible_host'] }},{{ h }},controlplane
+{% endfor %}
+{% for h in groups['talos_workers'] %}
+{{ hostvars[h]['ansible_host'] }},{{ h }},worker
+{% endfor %}

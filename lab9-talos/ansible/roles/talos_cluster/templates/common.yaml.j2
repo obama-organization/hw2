@@ -1,0 +1,44 @@
+# {{ ansible_managed }}
+machine:
+  logging:
+    destinations:
+      - endpoint: tcp://{{ mon_ip }}:{{ port_vector_service }}/
+        format: json_lines
+---
+apiVersion: v1alpha1
+kind: KmsgLogConfig
+name: remote-kmsg
+url: tcp://{{ mon_ip }}:{{ port_vector_kmsg }}/
+---
+apiVersion: v1alpha1
+kind: UnattendedInstallConfig
+installer:
+  image: {{ talos_installer_image }}
+provisioning:
+  diskSelector:
+    match: disk.dev_path == "/dev/sda"
+  wipe: false
+---
+apiVersion: v1alpha1
+kind: ResolverConfig
+nameservers:
+{% for ns in talos_dns_servers %}
+  - address: {{ ns }}
+{% endfor %}
+---
+apiVersion: v1alpha1
+kind: TimeSyncConfig
+ntp:
+  servers:
+    - time.cloudflare.com
+    - pool.ntp.org
+---
+apiVersion: v1alpha1
+kind: SysctlConfig
+params:
+  kernel.kptr_restrict: "2"
+  kernel.dmesg_restrict: "1"
+  net.ipv4.conf.all.rp_filter: "1"
+  net.ipv4.conf.all.accept_redirects: "0"
+  net.ipv4.conf.all.send_redirects: "0"
+  net.ipv4.conf.all.log_martians: "1"
