@@ -1,5 +1,5 @@
 ---
-- name: Резервне копіювання кластера Velero -> S3 (SeaweedFS на ВМ моніторингу)
+- name:  Velero
   hosts: localhost
   connection: local
   gather_facts: false
