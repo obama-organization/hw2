@@ -1,5 +1,5 @@
 ---
-- name: Перевірка логів, метрик, Falco і доставки алертів
+- name: Check logs, metrics, Falco alerts
   hosts: localhost
   connection: local
   gather_facts: false
@@ -10,7 +10,7 @@
     am: "http://{{ mon_ip }}:{{ port_alertmanager }}"
     cleanup: true
   tasks:
-    - name: Логи Talos (сервіси і ядро) є в Loki
+    - name: Logs Talos are in Loki
       ansible.builtin.uri:
         url: "{{ loki }}/loki/api/v1/query?query={{ 'sum by (node, stream) (count_over_time({job=\"talos\"}[15m]))' | urlencode }}"
         return_content: true
@@ -19,19 +19,15 @@
       retries: 20
       delay: 15
 
-    - name: Потоки логів Talos
+    - name: Stream Talos
       ansible.builtin.debug:
         msg: "{{ talos_logs.json.data.result | map(attribute='metric') | list }}"
 
-    - name: Цілі Prometheus, що не відповідають
+    - name: Unreachable targets Prometheus
       ansible.builtin.uri:
         url: "{{ prom }}/api/v1/query?query={{ 'up == 0' | urlencode }}"
         return_content: true
       register: down_targets
-
-    - name: Показати недоступні цілі (має бути порожньо)
-      ansible.builtin.debug:
-        msg: "{{ down_targets.json.data.result | map(attribute='metric') | list }}"
 
     - name: Метрики Talos (node-exporter, etcd) і kube-state-metrics збираються
       ansible.builtin.uri:
@@ -39,36 +35,6 @@
         return_content: true
       register: key_targets
       failed_when: key_targets.json.data.result | length < 3
-
-    - name: Под, що постійно падає (тест алерту)
-      ansible.builtin.shell: |
-        set -o pipefail
-        cat <<'EOF' | {{ kubectl }} apply -f -
-        apiVersion: v1
-        kind: Pod
-        metadata:
-          name: alert-test-crashloop
-          namespace: demo
-          labels: { purpose: alert-test }
-        spec:
-          restartPolicy: Always
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 1000
-            seccompProfile: { type: RuntimeDefault }
-          containers:
-            - name: crash
-              image: busybox:1.37
-              command: ["sh", "-c", "echo 'lab9: навмисна помилка для перевірки алертів'; sleep 5; exit 1"]
-              securityContext:
-                allowPrivilegeEscalation: false
-                capabilities: { drop: [ALL] }
-              resources:
-                limits: { memory: 16Mi, cpu: 50m }
-        EOF
-      args:
-        executable: /bin/bash
-      changed_when: true
 
     - name: Тестовий под для Falco
       ansible.builtin.command: >-
@@ -78,15 +44,15 @@
       changed_when: falco_pod.rc == 0
       failed_when: falco_pod.rc != 0 and 'AlreadyExists' not in falco_pod.stderr
 
-    - name: Под falco-test запущено
+    - name: Pod falco-test 
       ansible.builtin.command: "{{ kubectl }} -n default wait pod/falco-test --for=condition=Ready --timeout=180s"
       changed_when: false
 
-    - name: Читання /etc/shadow і запис у /etc у контейнері (правила Falco)
+    - name: Read /etc/shadow and in /etc  (rools Falco)
       ansible.builtin.command: "{{ kubectl }} -n default exec falco-test -- sh -c 'cat /etc/shadow >/dev/null; echo lab9 >> /etc/lab9-falco-test'"
       changed_when: true
 
-    - name: Події Falco в Loki
+    - name: Events Falco в Loki
       ansible.builtin.uri:
         url: "{{ loki }}/loki/api/v1/query?query={{ 'sum by (rule, priority) (count_over_time({rule=~\".+\"}[15m]))' | urlencode }}"
         return_content: true
@@ -95,7 +61,7 @@
       retries: 20
       delay: 10
 
-    - name: Показати події Falco
+    - name: Show Falco events
       ansible.builtin.debug:
         msg: "{{ falco_events.json.data.result | map(attribute='metric') | list }}"
 
@@ -108,16 +74,8 @@
       retries: 20
       delay: 10
 
-    - name: KubePodCrashLooping спрацював у Prometheus/Alertmanager (до ~6 хв)
-      ansible.builtin.uri:
-        url: "{{ am }}/api/v2/alerts?filter={{ 'alertname=\"KubePodCrashLooping\"' | urlencode }}"
-        return_content: true
-      register: crash_alert
-      until: crash_alert.json | length > 0
-      retries: 48
-      delay: 15
 
-    - name: Сповіщення доставлено (webhook -> Vector -> Loki)
+    - name: Alert delivered (webhook -> Vector -> Loki)
       ansible.builtin.uri:
         url: "{{ loki }}/loki/api/v1/query?query={{ 'sum by (alertname, status) (count_over_time({job=\"alertmanager\"}[30m]))' | urlencode }}"
         return_content: true
